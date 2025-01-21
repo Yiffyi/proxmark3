@@ -64,7 +64,71 @@ static const char *get_uid_type(iso14a_card_select_t *card) {
 
 int CmdHF14AFMCOSSim(const char *Cmd)
 {
-    return PM3_ESOFT;
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "hf 14a fmcos sim",
+                  "[CUSTOM] Simulate ZJZJY FMCOS tag",
+                  "hf 14a fmcos sim -u FAA8D8E5 -r 123456\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_str0("u", "uid", "<hex>", "<4|7|10> hex bytes UID"),
+        arg_str0("r", "rats", "<hex>", "<0-20> hex bytes RATS"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, false);
+
+    int uid_len = 0;
+    int rats_len = 0;
+
+    uint8_t uid[10] = {0};
+    uint8_t rats[20] = {0};
+
+    CLIGetHexWithReturn(ctx, 1, uid, &uid_len);
+    CLIGetHexWithReturn(ctx, 2, rats, &rats_len);
+
+    CLIParserFree(ctx);
+    struct {
+        uint8_t uid[10];
+        uint8_t rats[20];
+    } PACKED payload;
+    // Copy data to payload
+    memcpy(payload.uid, uid, uid_len);
+    memcpy(payload.rats, rats, rats_len);
+
+    if (uid_len != 4) {
+        PrintAndLogEx(ERR, "Please specify a 4 byte UID");
+        return PM3_EINVARG;
+    }
+    PrintAndLogEx(SUCCESS, "Emulating " _YELLOW_("ISO/IEC 14443 type A tag")" with " _GREEN_("%d byte UID (%s)"), uid_len, sprint_hex(uid, uid_len));
+
+    if (rats_len <= 0) {
+        PrintAndLogEx(ERR, "Please specify RATS");
+        return PM3_EINVARG;
+    }
+
+
+    clearCommandBuffer();
+    SendCommandNG(CMD_HF_ISO14443A_FMCOS_SIMULATE, (uint8_t *)&payload, sizeof(payload));
+    PacketResponseNG resp = {0};
+
+    PrintAndLogEx(INFO, "Press " _GREEN_("pm3 button") " to abort simulation");
+    bool keypress = kbd_enter_pressed();
+    while (keypress == false) {
+
+        if (WaitForResponseTimeout(CMD_HF_ISO14443A_FMCOS_SIMULATE, &resp, 1500) == 0)
+            continue;
+
+        if (resp.status != PM3_SUCCESS)
+            break;
+
+        keypress = kbd_enter_pressed();
+    }
+
+    PrintAndLogEx(INFO, "Done!");
+    PrintAndLogEx(HINT, "Try `" _YELLOW_("trace list -t 14a")"` to view captured tracelog");
+    PrintAndLogEx(HINT, "Try `" _YELLOW_("trace save -h") "` to save tracelog for later analysing");
+
+    return PM3_SUCCESS;
 }
 
 int SelectAndRead(const char sFileName[], const char sSelectCmd[], const char sReadCmd[], bool activateField, bool keepFieldOn, uint8_t *response, size_t szResponseMax, int *szResponse)
