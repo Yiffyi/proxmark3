@@ -239,6 +239,7 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
         return PM3_ESOFT;
     }
 
+    ActivateField = false; // avoid resetting tag
 
     SelectAndRead("7F03/0001", "00A4 0000 02 0001", "00B0 0000 40", ActivateField, true, response, sizeof response, &szResponse);
     SelectAndRead("7F03/00015", "00A4 0000 02 0015", "00B0 0000 60", ActivateField, true, response, sizeof response, &szResponse);
