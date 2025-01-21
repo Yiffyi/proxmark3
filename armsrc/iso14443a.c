@@ -3366,8 +3366,8 @@ int iso14_apdu(uint8_t *cmd, uint16_t cmd_len, bool send_chaining, void *data, u
     size_t len = ReaderReceive(data, data_len, parity_array);
     uint8_t *data_bytes = (uint8_t *) data;
 
-    if (len == 0) {
-        BigBuf_free();
+    if (!len) {
+        BigBuf_free_keep_EM();
         return 0; // DATA LINK ERROR
     }
 
@@ -3420,10 +3420,12 @@ int iso14_apdu(uint8_t *cmd, uint16_t cmd_len, bool send_chaining, void *data, u
         *res = data_bytes[0];
     }
 
-    // crc check
-    if (len >= 3 && !CheckCrc14A(data_bytes, len)) {
-        BigBuf_free();
-        return -1;
+        // crc check
+        if (len >= 3 && !CheckCrc14A(data_bytes, len)) {
+            BigBuf_free_keep_EM();
+            return -1;
+        }
+
     }
 
     if (len) {
@@ -3434,8 +3436,7 @@ int iso14_apdu(uint8_t *cmd, uint16_t cmd_len, bool send_chaining, void *data, u
             data_bytes[i] = data_bytes[i + 1];
         }
     }
-
-    BigBuf_free();
+    BigBuf_free_keep_EM();
     return len;
 }
 
