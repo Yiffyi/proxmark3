@@ -31,7 +31,7 @@ const uint8_t DF_3F00_RESPONSE[] = {
     0x6F, 0x15, 0x84, 0x0E, 0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31, 0xA5, 0x03, 0x88, 0x01, 0x01, 0x90, 0x00
 };
 
-void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *dynamic_response_info)
+void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp, int headerOffset)
 {
 
     switch (receivedCmd[3])
@@ -55,39 +55,139 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
 
         if (receivedCmd[4] == 0x00 && aidLen == 2)
         {
-            if (receivedAid[0] == 0x7F && receivedAid[1] == 0x03) {
+            if (receivedAid[0] == 0x7F && receivedAid[1] == 0x03)
+            {
                 // SELECT 7F03: DF
-                memcpy(dynamic_response_info->response + 2, DF_7F03_RESPONSE, sizeof DF_7F03_RESPONSE);
-                dynamic_response_info->response_n = sizeof DF_7F03_RESPONSE + 2;
+                memcpy(resp->response + headerOffset, DF_7F03_RESPONSE, sizeof DF_7F03_RESPONSE);
+                resp->response_n = sizeof DF_7F03_RESPONSE + headerOffset;
                 return;
-            } else if (receivedAid[0] == 0x3F && receivedAid[1] == 0x00) {
-                memcpy(dynamic_response_info->response + 2, DF_3F00_RESPONSE, sizeof DF_3F00_RESPONSE);
-                dynamic_response_info->response_n = sizeof DF_3F00_RESPONSE + 2;
+            }
+            else if (receivedAid[0] == 0x3F && receivedAid[1] == 0x00)
+            {
+                memcpy(resp->response + headerOffset, DF_3F00_RESPONSE, sizeof DF_3F00_RESPONSE);
+                resp->response_n = sizeof DF_3F00_RESPONSE + headerOffset;
                 return;
             }
         }
         else if (receivedCmd[4] == 0x04 && aidLen == sizeof DF_7F03_AID && memcmp(DF_7F03_AID, receivedAid, aidLen) == 0)
         {
-            memcpy(dynamic_response_info->response + 2, DF_7F03_RESPONSE, sizeof DF_7F03_RESPONSE);
-            dynamic_response_info->response_n = sizeof DF_7F03_RESPONSE + 2;
+            memcpy(resp->response + headerOffset, DF_7F03_RESPONSE, sizeof DF_7F03_RESPONSE);
+            resp->response_n = sizeof DF_7F03_RESPONSE + headerOffset;
             return;
         }
         // Any other SELECT FILE command will return with a Not Found
-        dynamic_response_info->response[2] = 0x6A;
-        dynamic_response_info->response[3] = 0x82;
-        dynamic_response_info->response_n = 4;
+        resp->response[headerOffset] = 0x6A;
+        resp->response[headerOffset + 1] = 0x82;
+        resp->response_n = headerOffset + 2;
     }
     break;
     default:
     {
         // Any other non-listed command
         // Respond Not Found
-        dynamic_response_info->response[2] = 0x6A;
-        dynamic_response_info->response[3] = 0x82;
-        dynamic_response_info->response_n = 4;
+        resp->response[headerOffset] = 0x6A;
+        resp->response[headerOffset + 1] = 0x82;
+        resp->response_n = headerOffset + 2;
     }
     }
     return;
+}
+
+void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp)
+{
+
+    // clear old dynamic responses
+    resp->response_n = 0;
+    resp->modulation_n = 0;
+
+    // Check for ISO 14443A-4 compliant commands, look at left nibble
+    switch (receivedCmd[0])
+    {
+    case 0x02:
+    case 0x03:
+    { // IBlock (command no CID)
+        resp->response[0] = receivedCmd[0];
+        resp->response[1] = 0x90;
+        resp->response[2] = 0x00;
+        resp->response_n = 3;
+        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, resp, 1);
+    }
+    break;
+    case 0x0B:
+    case 0x0A:
+    { // IBlock (command CID)
+        resp->response[0] = receivedCmd[0];
+        resp->response[1] = receivedCmd[1];
+        resp->response[2] = 0x90;
+        resp->response[3] = 0x00;
+        resp->response_n = 4;
+        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, resp, 2);
+    }
+    break;
+
+    case 0x1A:
+    case 0x1B:
+    { // Chaining command
+        resp->response[0] = 0xaa | ((receivedCmd[0]) & 1);
+        resp->response_n = 2;
+    }
+    break;
+
+    case 0xAA:
+    case 0xBB:
+    {
+        resp->response[0] = receivedCmd[0] ^ 0x11;
+        resp->response_n = 2;
+    }
+    break;
+
+    case 0xBA:
+    { // ping / pong
+        resp->response[0] = 0xAB;
+        resp->response[1] = 0x00;
+        resp->response_n = 2;
+    }
+    break;
+
+    case 0xCA:
+    case 0xC2:
+    { // Readers sends deselect command
+        resp->response[0] = 0xCA;
+        resp->response[1] = 0x00;
+        resp->response_n = 2;
+    }
+    break;
+
+    default:
+    {
+        if (g_dbglevel >= DBG_DEBUG)
+        {
+            Dbprintf("Received unknown command (len=%d):", receivedCmdLen);
+            Dbhexdump(receivedCmdLen, receivedCmd, false);
+        }
+        // Do not respond
+        resp->response_n = 0;
+        // order = ORDER_NONE; // back to work state
+    }
+    break;
+    }
+
+
+    if (resp->response_n > 0)
+    {
+        // Copy the CID from the reader query???
+        // resp->response[1] = receivedCmd[1];
+
+        // Add CRC bytes, always used in ISO 14443A-4 compliant cards
+        AddCrc14A(resp->response, resp->response_n);
+        resp->response_n += 2;
+
+        if (prepare_tag_modulation(resp, DYNAMIC_MODULATION_BUFFER_SIZE) == false)
+        {
+            if (g_dbglevel >= DBG_DEBUG)
+                DbpString("Error preparing tag response");
+        }
+    }
 }
 
 void SimulateFMCOSTag(uint8_t *uid,
@@ -154,6 +254,8 @@ void SimulateFMCOSTag(uint8_t *uid,
 
         tUart14a *Uart = GetUart14a();
 
+        LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
+
         if (receivedCmd[0] == ISO14443A_CMD_REQA && receivedCmdLen == 1)
         { // Received a REQUEST, but in HALTED, skip
             odd_reply = !odd_reply;
@@ -196,7 +298,6 @@ void SimulateFMCOSTag(uint8_t *uid,
         }
         else if (receivedCmd[0] == ISO14443A_CMD_HALT && receivedCmdLen == 4)
         { // Received a HALT
-            LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
             p_response = NULL;
             // order = ORDER_HALTED;
         }
@@ -206,106 +307,11 @@ void SimulateFMCOSTag(uint8_t *uid,
         }
         else
         {
-
-            // clear old dynamic responses
-            dynamic_response_info.response_n = 0;
-            dynamic_response_info.modulation_n = 0;
-
-            // Check for ISO 14443A-4 compliant commands, look at left nibble
-            switch (receivedCmd[0])
-            {
-            case 0x02:
-            case 0x03:
-            { // IBlock (command no CID)
-                dynamic_response_info.response[0] = receivedCmd[0];
-                dynamic_response_info.response[1] = 0x90;
-                dynamic_response_info.response[2] = 0x00;
-                dynamic_response_info.response_n = 3;
-            }
-            break;
-            case 0x0B:
-            case 0x0A:
-            { // IBlock (command CID)
-                dynamic_response_info.response[0] = receivedCmd[0];
-                dynamic_response_info.response[1] = 0x00;
-                dynamic_response_info.response[2] = 0x90;
-                dynamic_response_info.response[3] = 0x00;
-                dynamic_response_info.response_n = 4;
-
-                GenerateFMCOSResponse(receivedCmd, receivedCmdLen, &dynamic_response_info);
-            }
-            break;
-
-            case 0x1A:
-            case 0x1B:
-            { // Chaining command
-                dynamic_response_info.response[0] = 0xaa | ((receivedCmd[0]) & 1);
-                dynamic_response_info.response_n = 2;
-            }
-            break;
-
-            case 0xAA:
-            case 0xBB:
-            {
-                dynamic_response_info.response[0] = receivedCmd[0] ^ 0x11;
-                dynamic_response_info.response_n = 2;
-            }
-            break;
-
-            case 0xBA:
-            { // ping / pong
-                dynamic_response_info.response[0] = 0xAB;
-                dynamic_response_info.response[1] = 0x00;
-                dynamic_response_info.response_n = 2;
-            }
-            break;
-
-            case 0xCA:
-            case 0xC2:
-            { // Readers sends deselect command
-                dynamic_response_info.response[0] = 0xCA;
-                dynamic_response_info.response[1] = 0x00;
-                dynamic_response_info.response_n = 2;
-            }
-            break;
-
-            default:
-            {
-                // Never seen this command before
-                LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
-                if (g_dbglevel >= DBG_DEBUG)
-                {
-                    Dbprintf("Received unknown command (len=%d):", receivedCmdLen);
-                    Dbhexdump(receivedCmdLen, receivedCmd, false);
-                }
-                // Do not respond
-                dynamic_response_info.response_n = 0;
-                // order = ORDER_NONE; // back to work state
-            }
-            break;
-            }
-        }
-        if (dynamic_response_info.response_n > 0)
-        {
-
-            // Copy the CID from the reader query
-            dynamic_response_info.response[1] = receivedCmd[1];
-
-            // Add CRC bytes, always used in ISO 14443A-4 compliant cards
-            AddCrc14A(dynamic_response_info.response, dynamic_response_info.response_n);
-            dynamic_response_info.response_n += 2;
-
-            if (prepare_tag_modulation(&dynamic_response_info, DYNAMIC_MODULATION_BUFFER_SIZE) == false)
-            {
-                if (g_dbglevel >= DBG_DEBUG)
-                    DbpString("Error preparing tag response");
-                LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
-                break;
-            }
+            dynamic_response_info.response_n = dynamic_response_info.modulation_n = 0;
+            PrepareDynamicResponse(receivedCmd, receivedCmdLen, &dynamic_response_info);
             p_response = &dynamic_response_info;
         }
         cmdsRecvd++;
-
         // Send response
         EmSendPrecompiledCmd(p_response);
     }
