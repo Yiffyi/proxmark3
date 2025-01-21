@@ -1792,6 +1792,16 @@ static void PacketReceived(PacketCommandNG *packet) {
                              payload->rats, sizeof(payload->rats));
             break;
         }
+        case CMD_HF_ISO14443A_FMCOS_EML_ADD: {
+            fmcos_ef *payload = (fmcos_ef*) packet->data.asBytes;
+            FMCOSEmlMemAdd((fmcos_ef*)payload);
+            break;
+        }
+        case CMD_HF_ISO14443A_FMCOS_EML_CLEAR: {
+            BigBuf_Clear_EM();
+            reply_ng(CMD_HF_ISO14443A_FMCOS_EML_CLEAR, PM3_SUCCESS, NULL, 0);
+            break;
+        }
         case CMD_HF_ISO14443A_ANTIFUZZ: {
             struct p {
                 uint8_t flag;

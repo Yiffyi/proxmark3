@@ -20,6 +20,9 @@
 #define STATE_WUPA 6
 #define STATE_AUTH 7
 
+static uint16_t curDF = 0x3F00;
+static uint16_t curEF = 0x0000;
+
 const char DF_7F03_AID[] = {
     0xD5, 0xFD, 0xD4, 0xAA, 0xD6, 0xC7, 0xBB, 0xDB, 0xD2, 0xD7, 0xCD, 0xA8, 0x15, 0x01};
 
@@ -30,6 +33,76 @@ const uint8_t DF_7F03_RESPONSE[] = {
 const uint8_t DF_3F00_RESPONSE[] = {
     0x6F, 0x15, 0x84, 0x0E, 0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31, 0xA5, 0x03, 0x88, 0x01, 0x01, 0x90, 0x00
 };
+
+void FMCOSEmlMemAdd(fmcos_ef *ef)
+{
+    if (ef->szData ^ ef->iDF ^ ef->iEF != ef->checkSum) {
+        Dbprintf("ERROR: invalid checksum for incoming EF, iDF=%02X, iEF=%02X, szData=%d", ef->iDF, ef->iEF, ef->szData);
+        reply_ng(CMD_HF_ISO14443A_FMCOS_EML_ADD, PM3_ESOFT, NULL, 0);
+        return;
+    }
+
+    uint32_t offset = 0;
+    fmcos_ef *mem = (fmcos_ef*)BigBuf_get_EM_addr();
+    for (uint8_t i = 0; i < 250; i++) {
+        fmcos_ef *t = mem + offset;
+        if (t->iDF != 0 && t->szData ^ t->iDF ^ t->iEF == t->checkSum) {
+            offset += sizeof(fmcos_ef) + t->szData;
+        } else {
+            emlSet(ef, offset, sizeof(fmcos_ef) + ef->szData);
+            Dbprintf("SUCCESS: Placed %d bytes EF %02X%02X to eml mem, offset=%d", sizeof(fmcos_ef) + ef->szData, ef->iDF, ef->iEF, offset);
+            reply_ng(CMD_HF_ISO14443A_FMCOS_EML_ADD, PM3_SUCCESS, NULL, 0);
+            return;
+        }
+    }
+
+    Dbprintf("ERROR: too many items in eml mem");
+    reply_ng(CMD_HF_ISO14443A_FMCOS_EML_ADD, PM3_ESOFT, NULL, 0);
+    return;
+}
+
+fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF)
+{
+    uint32_t offset = 0;
+    fmcos_ef *mem = (fmcos_ef*)BigBuf_get_EM_addr();
+    for (uint8_t i = 0; i < 250; i++) {
+        fmcos_ef *t = mem + offset;
+        if (t->iDF != 0 && t->szData ^ t->iDF ^ t->iEF == t->checkSum) {
+            if (t->iDF == iDF && t->iEF == iEF) {
+                Dbprintf("SUCCESS: Retrieved %d bytes EF %02X%02X from eml mem, offset=%d", t->szData, t->iDF, t->iEF, offset);
+                return t;
+            } else {
+                offset += sizeof(fmcos_ef) + t->szData;
+            }
+        } else { // reached end of mem
+            break;
+        }
+    }
+    Dbprintf("ERROR: could not found EF %02X%02X in eml mem", iDF, iEF);
+    return NULL;
+}
+
+uint16_t FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName)
+{
+    uint32_t offset = 0;
+    fmcos_ef *mem = (fmcos_ef*)BigBuf_get_EM_addr();
+    for (uint8_t i = 0; i < 250; i++) {
+        fmcos_ef *t = mem + offset;
+        if (t->iDF != 0 && t->szData ^ t->iDF ^ t->iEF == t->checkSum) {
+            if (t->iEF == 0xFFFF && szName == t->szData && memcmp(name, t->bData, szName) == 0) {
+                Dbprintf("SUCCESS: Found DF %02X from eml mem", t->iDF);
+                return t->iDF;
+            } else {
+                offset += sizeof(fmcos_ef) + t->szData;
+            }
+        } else { // reached end of mem
+            break;
+        }
+    }
+    Dbprintf("ERROR: could not found requested DF in eml mem");
+    return NULL;
+}
+
 
 void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp, int headerOffset)
 {
@@ -53,27 +126,35 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
         Dbprintf("Received AID (%d):", aidLen);
         Dbhexdump(aidLen, receivedAid, false);
 
-        if (receivedCmd[4] == 0x00 && aidLen == 2)
+        if (receivedCmd[4] == 0x00 && aidLen == 2) // select by iDF or iEF
         {
-            if (receivedAid[0] == 0x7F && receivedAid[1] == 0x03)
-            {
-                // SELECT 7F03: DF
-                memcpy(resp->response + headerOffset, DF_7F03_RESPONSE, sizeof DF_7F03_RESPONSE);
-                resp->response_n = sizeof DF_7F03_RESPONSE + headerOffset;
+            // check EF under curDF
+            fmcos_ef *file = FMCOSEmlGetFile(curDF, (((uint16_t)receivedAid[1]) << 8) | receivedAid[0]);
+            if (file) {
+                memcpy(resp->response + headerOffset, file->bData, file->szData);
+                resp->response_n = file->szData + headerOffset;
                 return;
             }
-            else if (receivedAid[0] == 0x3F && receivedAid[1] == 0x00)
-            {
-                memcpy(resp->response + headerOffset, DF_3F00_RESPONSE, sizeof DF_3F00_RESPONSE);
-                resp->response_n = sizeof DF_3F00_RESPONSE + headerOffset;
+
+            // check DF
+            fmcos_ef *file = FMCOSEmlGetFile((((uint16_t)receivedAid[1]) << 8) | receivedAid[0], 0xFFFF);
+            if (file) {
+                memcpy(resp->response + headerOffset, file->bData, file->szData);
+                resp->response_n = file->szData + headerOffset;
+                curDF = file->iDF;
                 return;
             }
         }
-        else if (receivedCmd[4] == 0x04 && aidLen == sizeof DF_7F03_AID && memcmp(DF_7F03_AID, receivedAid, aidLen) == 0)
+        else if (receivedCmd[4] == 0x04)
         {
-            memcpy(resp->response + headerOffset, DF_7F03_RESPONSE, sizeof DF_7F03_RESPONSE);
-            resp->response_n = sizeof DF_7F03_RESPONSE + headerOffset;
-            return;
+            // try to match name
+            fmcos_ef *file = FMCOSEmlGetDFByName(receivedAid, aidLen);
+            if (file) {
+                memcpy(resp->response + headerOffset, file->bData, file->szData);
+                resp->response_n = file->szData + headerOffset;
+                curDF = file->iDF;
+                return;
+            }
         }
         // Any other SELECT FILE command will return with a Not Found
         resp->response[headerOffset] = 0x6A;
@@ -190,8 +271,7 @@ void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respon
     }
 }
 
-void SimulateFMCOSTag(uint8_t *uid,
-                      uint8_t *iRATs, size_t irats_len)
+void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
 {
     tag_response_info_t *responses;
     uint32_t cuid = 0;
@@ -253,8 +333,8 @@ void SimulateFMCOSTag(uint8_t *uid,
         }
 
         tUart14a *Uart = GetUart14a();
-
-        LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
+        // looks like its automatically logged
+        // LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
 
         if (receivedCmd[0] == ISO14443A_CMD_REQA && receivedCmdLen == 1)
         { // Received a REQUEST, but in HALTED, skip
