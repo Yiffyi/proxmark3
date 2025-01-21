@@ -34,6 +34,7 @@
 #include "iclass_cmd.h"
 #include "hfops.h"
 #include "iso14443a.h"
+#include "fmcos.h"
 #include "iso14443b.h"
 #include "iso15693.h"
 #include "thinfilm.h"
@@ -1778,6 +1779,17 @@ static void PacketReceived(PacketCommandNG *packet) {
                                     payload->ats, payload->ats_len, payload->aid, payload->aid_len,
                                     payload->selectaid_response, payload->selectaid_response_len,
                                     payload->getdata_response, payload->getdata_response_len);
+            break;
+        }
+        case CMD_HF_ISO14443A_FMCOS_SIMULATE: {
+            struct p {
+                uint8_t uid[10];
+                uint8_t rats[20];
+            } PACKED;
+            struct p *payload = (struct p *) packet->data.asBytes;
+
+            SimulateFMCOSTag(payload->uid,
+                             payload->rats, sizeof(payload->rats));
             break;
         }
         case CMD_HF_ISO14443A_ANTIFUZZ: {
