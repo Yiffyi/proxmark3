@@ -9,6 +9,7 @@
 
 int FMCOSEmlMemClr(void);
 int FMCOSEmlMemAdd(uint16_t iDF, uint16_t iEF, uint8_t szData, uint8_t *bData);
+int CmdHF14AFMCOSEmlList(const char *Cmd);
 int CmdHF14AFMCOS(const char *Cmd);
 int CmdHF14AFMCOSSim(const char *Cmd);
 int CmdHF14AFMCOSInfo(const char *Cmd);

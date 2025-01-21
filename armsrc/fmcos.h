@@ -19,6 +19,7 @@ typedef struct
 
 
 void FMCOSEmlMemAdd(fmcos_ef *ef);
+void FMCOSEmlList(void);
 fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF);
 fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName);
 

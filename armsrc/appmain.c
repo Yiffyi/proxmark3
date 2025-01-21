@@ -1802,6 +1802,11 @@ static void PacketReceived(PacketCommandNG *packet) {
             reply_ng(CMD_HF_ISO14443A_FMCOS_EML_CLEAR, PM3_SUCCESS, NULL, 0);
             break;
         }
+        case CMD_HF_ISO14443A_FMCOS_EML_LIST: {
+            FMCOSEmlList();
+            reply_ng(CMD_HF_ISO14443A_FMCOS_EML_LIST, PM3_SUCCESS, NULL, 0);
+            break;
+        }
         case CMD_HF_ISO14443A_ANTIFUZZ: {
             struct p {
                 uint8_t flag;

@@ -115,6 +115,23 @@ fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName)
     return NULL;
 }
 
+void FMCOSEmlList(void)
+{
+    uint32_t offset = 0;
+    fmcos_ef *mem = (fmcos_ef*)BigBuf_get_EM_addr();
+    for (uint8_t i = 0; i < 250; i++) {
+        fmcos_ef *t = mem + offset;
+        if (t->iDF != 0 && ef_checksum(t)) {
+            Dbprintf("At offset=%d: EF %04X/%04X has %d bytes of data", offset, t->iDF, t->iEF, t->szData);
+            offset += sizeof(fmcos_ef) + t->szData;
+        } else { // reached end of mem
+            Dbprintf("At offset=%d: invalid entry, iDF=%04X,iEF=%04X,szData=%d", offset, t->iDF, t->iEF, t->szData);
+            break;
+        }
+    }
+    return;
+}
+
 
 void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp, int headerOffset)
 {
@@ -142,7 +159,7 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
         {
             // if (aidLen == 2) {
             // }
-            uint16_t wanted = (((uint16_t)receivedAid[1]) << 8) | receivedAid[0];
+            uint16_t wanted = (((uint16_t)receivedAid[0]) << 8) | receivedAid[1];
             // check EF under curDF
             fmcos_ef *file = FMCOSEmlGetFile(curDF, wanted);
             if (file) {
@@ -153,7 +170,7 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
             }
 
             // check DF
-            file = FMCOSEmlGetFile(wanted, 0xFFFF);
+            file = FMCOSEmlGetFile(wanted, 0x0000);
             if (file) {
                 memcpy(resp->response + headerOffset, file->bData, file->szData);
                 resp->response_n = file->szData + headerOffset;

@@ -79,6 +79,7 @@ int FMCOSEmlMemClr(void)
 }
 
 int FMCOSEmlMemAdd(uint16_t iDF, uint16_t iEF, uint8_t szData, uint8_t *bData) {
+    CmdHF14AFMCOSEmlList(NULL);
     struct fmcos_ef
     {
         uint16_t iDF;
@@ -111,6 +112,21 @@ int FMCOSEmlMemAdd(uint16_t iDF, uint16_t iEF, uint8_t szData, uint8_t *bData) {
         return PM3_SUCCESS;
     } else {
         PrintAndLogEx(ERR, "FMCOSEmlMemAdd: failed");
+        return PM3_EFAILED;
+    }
+}
+
+int CmdHF14AFMCOSEmlList(const char *Cmd)
+{
+    clearCommandBuffer();
+    SendCommandNG(CMD_HF_ISO14443A_FMCOS_EML_LIST, NULL, 0);
+
+    bool ok = WaitForResponseTimeout(CMD_HF_ISO14443A_FMCOS_EML_LIST, NULL, 1500);
+    if (ok) {
+        PrintAndLogEx(INFO, "FMCOSEmlMemList: success");
+        return PM3_SUCCESS;
+    } else {
+        PrintAndLogEx(ERR, "FMCOSEmlMemList: failed");
         return PM3_EFAILED;
     }
 }
@@ -241,6 +257,11 @@ int SelectAndRead(const char sFileName[], const char sSelectCmd[], const char sR
     print_buffer(response, *szResponse, 1);
     return PM3_SUCCESS;
 }
+
+// int SelectApplication(uint16_t iDF)
+// {
+    
+// }
 
 
 int CmdHF14AFMCOSInfo(const char *Cmd)
@@ -420,6 +441,7 @@ static command_t CommandTable[] = {
     {"-----------", CmdHelp,              IfPm3Iso14443a,  "---------------------- " _CYAN_("Operations") " ---------------------"},
     {"info",        CmdHF14AFMCOSInfo,    IfPm3Iso14443a,  "Tag information"},
     {"sim",         CmdHF14AFMCOSSim,     IfPm3Iso14443a,  "Simulate ISO 14443-a tag"},
+    {"emlist",      CmdHF14AFMCOSEmlList, IfPm3Iso14443a,  "List stored EML data"},
     // {"list",        CmdHF14AList,         AlwaysAvailable, "List ISO 14443-a history"},
     // {"antifuzz",    CmdHF14AAntiFuzz,     IfPm3Iso14443a,  "Fuzzing the anticollision phase.  Warning! Readers may react strange"},
     // {"config",      CmdHf14AConfig,       IfPm3Iso14443a,  "Configure 14a settings (use with caution)"},
