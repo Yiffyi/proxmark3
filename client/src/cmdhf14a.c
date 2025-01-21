@@ -25,6 +25,8 @@
 #include "cliparser.h"
 #include "cmdhfmf.h"
 #include "cmdhfmfu.h"
+#include "cmdhf14afmcos.h"
+
 #include "iso7816/iso7816core.h"
 #include "emv/emvcore.h"
 #include "ui.h"
@@ -4393,6 +4395,8 @@ static command_t CommandTable[] = {
     {"ndefformat",  CmdHF14ANdefFormat,   IfPm3Iso14443a,  "Format ISO 14443-A as NFC Type 4 tag"},
     {"ndefread",    CmdHF14ANdefRead,     IfPm3Iso14443a,  "Read an NDEF file from ISO 14443-A Type 4 tag"},
     {"ndefwrite",   CmdHF14ANdefWrite,    IfPm3Iso14443a,  "Write NDEF records to ISO 14443-A tag"},
+    {"-----------", CmdHelp,              IfPm3Iso14443a,  "------------------------- " _CYAN_("FMCOS") " -------------------------"},
+    {"fmcos",       CmdHF14AFMCOS,        IfPm3Iso14443a,  "[CUSTOMIZED] ZJZY, FMCOS"},
     {NULL, NULL, NULL, NULL}
 };
 
