@@ -19,10 +19,11 @@ typedef struct
 
 
 void FMCOSEmlMemAdd(fmcos_ef *ef);
-bool FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF, fmcos_ef* buf);
+fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF);
+fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName);
 
 void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp, int headerOffset);
 void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp);
 void SimulateFMCOSTag(uint8_t *uid,
-                      uint8_t *iRATs, size_t irats_len, fmcos_ef *files, uint8_t nFiles);
+                      uint8_t *iRATs, size_t irats_len);
 #endif /* __FMCOS_H */
