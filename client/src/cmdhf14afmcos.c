@@ -78,14 +78,14 @@ int FMCOSEmlMemClr(void)
     }
 }
 
-int FMCOSEmlMemAdd(uint16_t iDF, uint16_t iEF, uint8_t szData, uint8_t *bData) {
+int FMCOSEmlMemAdd(uint16_t iDF, uint16_t iEF, uint16_t szData, uint8_t *bData) {
     CmdHF14AFMCOSEmlList(NULL);
     struct fmcos_ef
     {
         uint16_t iDF;
         uint16_t iEF;
-        uint8_t checkSum;
-        uint8_t szData;
+        uint16_t checkSum;
+        uint16_t szData;
         uint8_t bData[];
     } PACKED;
 

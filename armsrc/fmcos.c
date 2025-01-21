@@ -15,8 +15,8 @@
 // Increased the buffer size to allow for more complex responses
 #define DYNAMIC_RESPONSE_BUFFER2_SIZE 512
 #define DYNAMIC_MODULATION_BUFFER2_SIZE 1536
-#define DYNAMIC_RESPONSE_BUFFER_SIZE 64
-#define DYNAMIC_MODULATION_BUFFER_SIZE 512
+// #define DYNAMIC_RESPONSE_BUFFER_SIZE 64
+// #define DYNAMIC_MODULATION_BUFFER_SIZE 512
 
 #define STATE_NONE 0
 #define STATE_HALTED 5
@@ -25,10 +25,11 @@
 
 static uint16_t curDF = 0x3F00;
 static uint16_t curEF = 0x0000;
+static fmcos_ef *curFile = NULL;
 
 static bool ef_checksum(const fmcos_ef* ef)
 {
-    uint8_t t = ef->checkSum;
+    uint16_t t = ef->checkSum;
     t ^= ef->iDF;
     t ^= ef->iEF;
     t ^= ef->szData;
@@ -122,9 +123,10 @@ void FMCOSEmlList(void)
 }
 
 
-void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp, int headerOffset)
+void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp)
 {
 
+    uint8_t sw1 = 0x90, sw2 = 0x00;
     switch (receivedCmd[3])
     { // APDU Class Byte
       // receivedCmd in this case is expecting to structured with a CID, then the APDU command for SelectFile
@@ -154,21 +156,22 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
             if (file) {
                 // memcpy(resp->response + headerOffset, file->bData, file->szData);
                 // resp->response_n = file->szData + headerOffset;
-                resp->response[headerOffset] = 0x90;
-                resp->response[headerOffset + 1] = 0x00;
-                resp->response_n = 2 + headerOffset;
+                sw1 = 0x90;
+                sw2 = 0x00;
                 curEF = file->iEF;
-                return;
+                curFile = file;
+                goto addSW;
             }
 
             // check DF
             file = FMCOSEmlGetFile(wanted, 0x0000);
             if (file) {
-                memcpy(resp->response + headerOffset, file->bData, file->szData);
-                resp->response_n = file->szData + headerOffset;
+                memcpy(resp->response + resp->response_n, file->bData, file->szData);
+                resp->response_n += file->szData;
                 curDF = file->iDF;
                 curEF = 0x0000;
-                return;
+                curFile = NULL;
+                goto ret;
             }
         }
         else if (receivedCmd[4] == 0x04 && receivedCmd[5] == 0x00)
@@ -176,34 +179,68 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
             // try to match name
             fmcos_ef *file = FMCOSEmlGetDFByName(receivedAid, aidLen);
             if (file) {
-                memcpy(resp->response + headerOffset, file->bData, file->szData);
-                resp->response_n = file->szData + headerOffset;
+                memcpy(resp->response + resp->response_n, file->bData, file->szData);
+                resp->response_n += file->szData;
                 curDF = file->iDF;
                 curEF = 0x0000;
-                return;
+                curFile = NULL;
+                goto ret;
             }
         } else {
             // Incorrect P1 or P2
-            resp->response[headerOffset] = 0x6A;
-            resp->response[headerOffset + 1] = 0x86;
-            resp->response_n = headerOffset + 2;
-            return;
+            sw1 = 0x6A; sw2 = 0x86;
+            goto addSW;
         }
         // Any other SELECT FILE command will return with a Not Found
-        resp->response[headerOffset] = 0x6A;
-        resp->response[headerOffset + 1] = 0x82;
-        resp->response_n = headerOffset + 2;
+        sw1 = 0x6A; sw2 = 0x82;
+        goto addSW;
     }
     break;
-    default:
+    case 0xB0:
     {
-        // Any other non-listed command
-        // Respond Not Found
-        resp->response[headerOffset] = 0x6A;
-        resp->response[headerOffset + 1] = 0x82;
-        resp->response_n = headerOffset + 2;
+        // READ BINARY
+        uint8_t p1 = receivedCmd[4], p2 = receivedCmd[5];
+        uint16_t iEF = 0;
+        uint16_t offset = 0;
+        uint8_t le = receivedCmd[6];
+        fmcos_ef *file = NULL;
+        if ((p1 & 0xE0) == 0x80) {
+            iEF = p1 & 0x1F;
+            file = FMCOSEmlGetFile(curDF, iEF);
+            offset = p2;
+        } else {
+            iEF = curEF;
+            file = curFile;
+            offset = (p1 << 8) | p2;
+        }
+
+        if (file) {
+            if (offset + le > file->szData - 2) { // too long
+                sw1 = 0x6B; sw2 = 0x00;
+                goto addSW;
+            }
+
+            memcpy(resp->response + resp->response_n, file->bData + offset, le);
+            sw1 = 0x90;
+            sw2 = 0x00;
+            resp->response_n += le;
+            goto addSW;
+        } else {
+            sw1 = 0x6A;
+            sw2 = 0x82;
+            goto addSW;
+        }
     }
+    break;
     }
+
+addSW:
+    resp->response[resp->response_n] = sw1;
+    resp->response[resp->response_n+1] = sw2;
+    resp->response_n += 2;
+    // Any other non-listed command
+    // Respond Not Found
+ret:
     return;
 }
 
@@ -221,10 +258,10 @@ void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respon
     case 0x03:
     { // IBlock (command no CID)
         resp->response[0] = receivedCmd[0];
-        resp->response[1] = 0x90;
-        resp->response[2] = 0x00;
-        resp->response_n = 3;
-        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, resp, 1);
+        // resp->response[1] = 0x90;
+        // resp->response[2] = 0x00;
+        resp->response_n = 1;
+        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, resp);
     }
     break;
     case 0x0B:
@@ -232,10 +269,10 @@ void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respon
     { // IBlock (command CID)
         resp->response[0] = receivedCmd[0];
         resp->response[1] = receivedCmd[1];
-        resp->response[2] = 0x90;
-        resp->response[3] = 0x00;
-        resp->response_n = 4;
-        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, resp, 2);
+        // resp->response[2] = 0x90;
+        // resp->response[3] = 0x00;
+        resp->response_n = 2;
+        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, resp);
     }
     break;
 
@@ -296,7 +333,7 @@ void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respon
         AddCrc14A(resp->response, resp->response_n);
         resp->response_n += 2;
 
-        if (prepare_tag_modulation(resp, DYNAMIC_MODULATION_BUFFER_SIZE) == false)
+        if (prepare_tag_modulation(resp, DYNAMIC_MODULATION_BUFFER2_SIZE) == false)
         {
             if (g_dbglevel >= DBG_DEBUG)
                 DbpString("Error preparing tag response");
@@ -431,7 +468,7 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
             num_to_bytes(nonce, 4, dynamic_response_info.response);
             dynamic_response_info.response_n = 4;
 
-            prepare_tag_modulation(&dynamic_response_info, DYNAMIC_MODULATION_BUFFER_SIZE);
+            prepare_tag_modulation(&dynamic_response_info, DYNAMIC_MODULATION_BUFFER2_SIZE);
             p_response = &dynamic_response_info;
             // order = ORDER_AUTH;
         }

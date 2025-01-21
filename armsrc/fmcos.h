@@ -12,8 +12,8 @@ typedef struct
 {
     uint16_t iDF;
     uint16_t iEF;
-    uint8_t checkSum;
-    uint8_t szData;
+    uint16_t checkSum;
+    uint16_t szData;
     uint8_t bData[];
 } PACKED fmcos_ef; // bData will not be included in sizeof
 
@@ -23,7 +23,7 @@ void FMCOSEmlList(void);
 fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF);
 fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName);
 
-void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp, int headerOffset);
+void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp);
 void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp);
 void SimulateFMCOSTag(uint8_t *uid,
                       uint8_t *iRATs, size_t irats_len);
