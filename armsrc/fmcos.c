@@ -8,6 +8,9 @@
 #include "fpgaloader.h"
 #include "protocols.h"
 #include "dbprint.h"
+#include "mifareutil.h"
+#include "ticks.h"
+#include "commonutil.h"
 
 // Increased the buffer size to allow for more complex responses
 #define DYNAMIC_RESPONSE_BUFFER2_SIZE 512
@@ -46,7 +49,7 @@ static bool ef_checksum(const fmcos_ef* ef)
 void FMCOSEmlMemAdd(fmcos_ef *ef)
 {
     if (!ef_checksum(ef)) {
-        Dbprintf("ERROR: invalid checksum for incoming EF, iDF=%02X, iEF=%02X, szData=%d", ef->iDF, ef->iEF, ef->szData);
+        Dbprintf("ERROR: invalid checksum for incoming EF, iDF=%04X, iEF=%04X, szData=%d", ef->iDF, ef->iEF, ef->szData);
         reply_ng(CMD_HF_ISO14443A_FMCOS_EML_ADD, PM3_ESOFT, NULL, 0);
         return;
     }
@@ -59,7 +62,7 @@ void FMCOSEmlMemAdd(fmcos_ef *ef)
             offset += sizeof(fmcos_ef) + t->szData;
         } else {
             emlSet((uint8_t*)ef, offset, sizeof(fmcos_ef) + ef->szData);
-            Dbprintf("SUCCESS: Placed %d bytes EF %02X%02X to eml mem, offset=%d", sizeof(fmcos_ef) + ef->szData, ef->iDF, ef->iEF, offset);
+            Dbprintf("SUCCESS: Placed %d bytes EF %04X/%04X to eml mem, offset=%d", sizeof(fmcos_ef) + ef->szData, ef->iDF, ef->iEF, offset);
             reply_ng(CMD_HF_ISO14443A_FMCOS_EML_ADD, PM3_SUCCESS, NULL, 0);
             return;
         }
@@ -78,7 +81,7 @@ fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF)
         fmcos_ef *t = mem + offset;
         if (t->iDF != 0 && ef_checksum(t)) {
             if (t->iDF == iDF && t->iEF == iEF) {
-                Dbprintf("SUCCESS: Retrieved %d bytes EF %02X%02X from eml mem, offset=%d", t->szData, t->iDF, t->iEF, offset);
+                Dbprintf("SUCCESS: Retrieved %d bytes EF %04X/%04X from eml mem, offset=%d", t->szData, t->iDF, t->iEF, offset);
                 return t;
             } else {
                 offset += sizeof(fmcos_ef) + t->szData;
@@ -87,7 +90,7 @@ fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF)
             break;
         }
     }
-    Dbprintf("ERROR: could not found EF %02X%02X in eml mem", iDF, iEF);
+    Dbprintf("ERROR: could not found EF %04X/%04X in eml mem", iDF, iEF);
     return NULL;
 }
 
@@ -99,7 +102,7 @@ fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName)
         fmcos_ef *t = mem + offset;
         if (t->iDF != 0 && ef_checksum(t)) {
             if (t->iEF == 0xFFFF && szName == t->szData && memcmp(name, t->bData, szName) == 0) {
-                Dbprintf("SUCCESS: Found DF %02X from eml mem", t->iDF);
+                Dbprintf("SUCCESS: Found DF %04X from eml mem", t->iDF);
                 return t;
             } else {
                 offset += sizeof(fmcos_ef) + t->szData;
@@ -331,6 +334,11 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
     int cmdsRecvd = 0;
     bool odd_reply = true;
     bool finished = false;
+
+
+    uint32_t nonce = 0;
+    // uint8_t cardAUTHSC = 0;
+    // uint8_t cardAUTHKEY = 0xff;  // no authentication
     while (finished == false)
     {
         // BUTTON_PRESS check done in GetIso14443aCommandFromReader
@@ -397,6 +405,18 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
         else if (receivedCmd[0] == ISO14443A_CMD_RATS && receivedCmdLen == 4)
         { // Received a RATS request
             p_response = &responses[RESP_INDEX_RATS];
+        } else if ((receivedCmd[0] == MIFARE_AUTH_KEYA || receivedCmd[0] == MIFARE_AUTH_KEYB) && receivedCmdLen == 4) {    // Received an authentication request
+            // cardAUTHKEY = receivedCmd[0] - 0x60;
+            // cardAUTHSC = receivedCmd[1] / 4; // received block num
+
+            // incease nonce at AUTH requests. this is time consuming.
+            nonce = prng_successor(GetTickCount(), 32);
+            num_to_bytes(nonce, 4, dynamic_response_info.response);
+            dynamic_response_info.response_n = 4;
+
+            prepare_tag_modulation(&dynamic_response_info, DYNAMIC_MODULATION_BUFFER_SIZE);
+            p_response = &dynamic_response_info;
+            // order = ORDER_AUTH;
         }
         else
         {
