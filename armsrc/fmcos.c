@@ -1,9 +1,13 @@
 #include "fmcos.h"
 #include "iso14443a.h"
 
+#include "string.h"
+#include "proxmark3_arm.h"
+#include "cmd.h"
 #include "BigBuf.h"
 #include "fpgaloader.h"
 #include "protocols.h"
+#include "dbprint.h"
 
 // Increased the buffer size to allow for more complex responses
 #define DYNAMIC_RESPONSE_BUFFER2_SIZE 512
