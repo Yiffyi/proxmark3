@@ -26,17 +26,6 @@
 static uint16_t curDF = 0x3F00;
 static uint16_t curEF = 0x0000;
 
-const char DF_7F03_AID[] = {
-    0xD5, 0xFD, 0xD4, 0xAA, 0xD6, 0xC7, 0xBB, 0xDB, 0xD2, 0xD7, 0xCD, 0xA8, 0x15, 0x01};
-
-const uint8_t DF_7F03_RESPONSE[] = {
-    0x6F, 0x16, 0x84, 0x0E, 0xD5, 0xFD, 0xD4, 0xAA, 0xD6, 0xC7, 0xBB, 0xDB, 0xD2, 0xD7, 0xCD, 0xA8, 0x15, 0x01, 0xA5, 0x04, 0x9F, 0x08, 0x01, 0x02, 0x90, 0x00
-};
-
-const uint8_t DF_3F00_RESPONSE[] = {
-    0x6F, 0x15, 0x84, 0x0E, 0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31, 0xA5, 0x03, 0x88, 0x01, 0x01, 0x90, 0x00
-};
-
 static bool ef_checksum(const fmcos_ef* ef)
 {
     uint8_t t = ef->checkSum;
@@ -55,9 +44,9 @@ void FMCOSEmlMemAdd(fmcos_ef *ef)
     }
 
     uint32_t offset = 0;
-    fmcos_ef *mem = (fmcos_ef*)BigBuf_get_EM_addr();
+    uint8_t *mem = BigBuf_get_EM_addr();
     for (uint8_t i = 0; i < 250; i++) {
-        fmcos_ef *t = mem + offset;
+        fmcos_ef *t = (fmcos_ef*)(mem + offset);
         if (t->iDF != 0 && ef_checksum(t)) {
             offset += sizeof(fmcos_ef) + t->szData;
         } else {
@@ -76,9 +65,9 @@ void FMCOSEmlMemAdd(fmcos_ef *ef)
 fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF)
 {
     uint32_t offset = 0;
-    fmcos_ef *mem = (fmcos_ef*)BigBuf_get_EM_addr();
+    uint8_t *mem = BigBuf_get_EM_addr();
     for (uint8_t i = 0; i < 250; i++) {
-        fmcos_ef *t = mem + offset;
+        fmcos_ef *t = (fmcos_ef*)(mem + offset);
         if (t->iDF != 0 && ef_checksum(t)) {
             if (t->iDF == iDF && t->iEF == iEF) {
                 Dbprintf("SUCCESS: Retrieved %d bytes EF %04X/%04X from eml mem, offset=%d", t->szData, t->iDF, t->iEF, offset);
@@ -97,9 +86,9 @@ fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF)
 fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName)
 {
     uint32_t offset = 0;
-    fmcos_ef *mem = (fmcos_ef*)BigBuf_get_EM_addr();
+    uint8_t *mem = BigBuf_get_EM_addr();
     for (uint8_t i = 0; i < 250; i++) {
-        fmcos_ef *t = mem + offset;
+        fmcos_ef *t = (fmcos_ef*)(mem + offset);
         if (t->iDF != 0 && ef_checksum(t)) {
             if (t->iEF == 0xFFFF && szName == t->szData && memcmp(name, t->bData, szName) == 0) {
                 Dbprintf("SUCCESS: Found DF %04X from eml mem", t->iDF);
@@ -118,9 +107,9 @@ fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName)
 void FMCOSEmlList(void)
 {
     uint32_t offset = 0;
-    fmcos_ef *mem = (fmcos_ef*)BigBuf_get_EM_addr();
+    uint8_t *mem = BigBuf_get_EM_addr();
     for (uint8_t i = 0; i < 250; i++) {
-        fmcos_ef *t = mem + offset;
+        fmcos_ef *t = (fmcos_ef*)(mem + offset);
         if (t->iDF != 0 && ef_checksum(t)) {
             Dbprintf("At offset=%d: EF %04X/%04X has %d bytes of data", offset, t->iDF, t->iEF, t->szData);
             offset += sizeof(fmcos_ef) + t->szData;
@@ -163,8 +152,11 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
             // check EF under curDF
             fmcos_ef *file = FMCOSEmlGetFile(curDF, wanted);
             if (file) {
-                memcpy(resp->response + headerOffset, file->bData, file->szData);
-                resp->response_n = file->szData + headerOffset;
+                // memcpy(resp->response + headerOffset, file->bData, file->szData);
+                // resp->response_n = file->szData + headerOffset;
+                resp->response[headerOffset] = 0x90;
+                resp->response[headerOffset + 1] = 0x00;
+                resp->response_n = 2 + headerOffset;
                 curEF = file->iEF;
                 return;
             }
