@@ -61,6 +61,57 @@ static const char *get_uid_type(iso14a_card_select_t *card) {
     return s;
 }
 
+int FMCOSEmlMemClr(void)
+{
+    clearCommandBuffer();
+    SendCommandNG(CMD_HF_ISO14443A_FMCOS_EML_CLEAR, NULL, 0);
+
+    bool ok = WaitForResponseTimeout(CMD_HF_ISO14443A_FMCOS_EML_CLEAR, NULL, 1500);
+    if (ok) {
+        PrintAndLogEx(INFO, "FMCOSEmlMemClr: success");
+        return PM3_SUCCESS;
+    } else {
+        PrintAndLogEx(ERR, "FMCOSEmlMemClr: failed");
+        return PM3_EFAILED;
+    }
+}
+
+int FMCOSEmlMemAdd(uint16_t iDF, uint16_t iEF, uint8_t szData, uint8_t *bData) {
+    struct fmcos_ef
+    {
+        uint16_t iDF;
+        uint16_t iEF;
+        uint8_t checkSum;
+        uint8_t szData;
+        uint8_t bData[];
+    } PACKED;
+
+    // if (szData > (PM3_CMD_DATA_SIZE - sizeof(struct fmcos_ef))) {
+    //     return PM3_EINVARG;
+    // }
+
+    size_t payloadLen = sizeof(struct fmcos_ef) + szData;
+    struct fmcos_ef *payload = calloc(1, payloadLen);
+
+    payload->iDF = iDF;
+    payload->iEF = iEF;
+    payload->szData = szData;
+    payload->checkSum = iDF ^ iEF ^ szData;
+    memcpy(payload->bData, bData, szData);
+
+    clearCommandBuffer();
+    SendCommandNG(CMD_HF_ISO14443A_FMCOS_EML_ADD, (uint8_t *)payload, payloadLen);
+    free(payload);
+
+    bool ok = WaitForResponseTimeout(CMD_HF_ISO14443A_FMCOS_EML_ADD, NULL, 1500);
+    if (ok) {
+        PrintAndLogEx(INFO, "FMCOSEmlMemAdd: success");
+        return PM3_SUCCESS;
+    } else {
+        PrintAndLogEx(ERR, "FMCOSEmlMemAdd: failed");
+        return PM3_EFAILED;
+    }
+}
 
 int CmdHF14AFMCOSSim(const char *Cmd)
 {
@@ -193,6 +244,7 @@ int SelectAndRead(const char sFileName[], const char sSelectCmd[], const char sR
 int CmdHF14AFMCOSInfo(const char *Cmd)
 {
     bool verbose = true;
+    bool loadEml = true;
     // bool do_nack_test = false;
     // bool do_aid_search = false;
 
@@ -204,11 +256,13 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
     void *argtable[] = {
         arg_param_begin,
         arg_lit0("v",  "verbose",   "verbose output"),
+        arg_lit0("l",  "load",      "load data on emulator"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
 
     verbose = arg_get_lit(ctx, 1);
+    loadEml = arg_get_lit(ctx, 2);
     // do_nack_test = arg_get_lit(ctx, 2);
     // do_aid_search = arg_get_lit(ctx, 3);
 
@@ -279,8 +333,7 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
     int ret = ExchangeAPDU14a(bufAPDU, szAPDU, ActivateField, true, response, sizeof response, &szResponse);
     if (ret != PM3_SUCCESS) {
         PrintAndLogEx(FAILED, "SELECT 7F03: error %d", ret);
-        DropField();
-        return ret;
+        goto fail;
     }
 
     sw = get_sw(response, szResponse);
@@ -293,21 +346,46 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
             PrintAndLogEx(SUCCESS, "Application " _CYAN_("7F03") " ( " _GREEN_("ok") " )");
         } else {
             PrintAndLogEx(WARNING, "Application " _CYAN_("7F03") " ( " _RED_("blocked") " )");
+            goto fail;
         }
     } else {
         PrintAndLogEx(FAILED, "SELECT AID " _RED_("FAILED") ": %02X %02X", sw1, sw2);
-        DropField();
-        return PM3_ESOFT;
+        goto fail;
+    }
+
+    if (loadEml) {
+        if (FMCOSEmlMemClr() != PM3_SUCCESS) goto fail;
+        if (FMCOSEmlMemAdd(0x7F03, 0x0000, szResponse, response) != PM3_SUCCESS) goto fail;
     }
 
     ActivateField = false; // avoid resetting tag
 
     SelectAndRead("7F03/0001", "00A4 0000 02 0001", "00B0 0000 40", ActivateField, true, response, sizeof response, &szResponse);
+    if (loadEml) {
+        if (FMCOSEmlMemAdd(0x7F03, 0x0001, szResponse, response) != PM3_SUCCESS) goto fail;
+    }
+
     SelectAndRead("7F03/0015", "00A4 0000 02 0015", "00B0 0000 60", ActivateField, true, response, sizeof response, &szResponse);
+    if (loadEml) {
+        if (FMCOSEmlMemAdd(0x7F03, 0x0015, szResponse, response) != PM3_SUCCESS) goto fail;
+    }
+
     SelectAndRead("7F03/0016", "00A4 0000 02 0016", "00B0 0000 60", ActivateField, true, response, sizeof response, &szResponse);
+    if (loadEml) {
+        if (FMCOSEmlMemAdd(0x7F03, 0x0016, szResponse, response) != PM3_SUCCESS) goto fail;
+    }
+
     SelectAndRead("7F03/0019", "00A4 0000 02 0019", "00B0 0000 40", ActivateField, true, response, sizeof response, &szResponse);
+    if (loadEml) {
+        if (FMCOSEmlMemAdd(0x7F03, 0x0019, szResponse, response) != PM3_SUCCESS) goto fail;
+    }
     DropField();
+
+    PrintAndLogEx(INFO, "Hint: start simulator with 'hf 14a fmcos sim -u %s -r %s'", sprint_hex_inrow(card.uid, card.uidlen), sprint_hex_inrow(card.ats, card.ats_len));
     return PM3_SUCCESS;
+fail:
+    DropField();
+    return PM3_ESOFT;
 }
 
 static command_t CommandTable[] = {
