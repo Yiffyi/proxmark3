@@ -275,7 +275,9 @@ static command_t CommandTable[] = {
 
 int CmdHF14AFMCOS(const char *Cmd)
 {
-    return PM3_ESOFT;
+    clearCommandBuffer();
+    return CmdsParse(CommandTable, Cmd);
+    // return PM3_ESOFT;
 }
 
 int CmdHelp(const char *Cmd) {
