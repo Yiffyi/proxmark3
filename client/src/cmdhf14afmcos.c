@@ -25,6 +25,8 @@
 #include "preferences.h" // get/set device debug level
 
 
+#define UTIL_BUFFER_SIZE_SPRINT 8196
+
 static int CmdHelp(const char *Cmd);
 
 static const char *get_uid_type(iso14a_card_select_t *card) {
@@ -313,6 +315,13 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
     PrintAndLogEx(SUCCESS, "ATQA: " _GREEN_("%02X %02X"), card.atqa[1], card.atqa[0]);
     PrintAndLogEx(SUCCESS, " SAK: " _GREEN_("%02X [%" PRIu64 "]"), card.sak, select_status);
 
+    if (card.ats_len >= 3) { // a valid ATS consists of at least the length byte (TL) and 2 CRC bytes
+        if (card.ats_len == card.ats[0] + 2)
+            PrintAndLogEx(SUCCESS, " ATS: "  _GREEN_("%s"), sprint_hex(card.ats, card.ats[0]));
+        else {
+            PrintAndLogEx(SUCCESS, " ATS: [%d] "  _GREEN_("%s"), card.ats_len, sprint_hex(card.ats, card.ats_len));
+        }
+    }
     bool ActivateField = true;
 
 
@@ -381,7 +390,24 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
     }
     DropField();
 
-    PrintAndLogEx(INFO, "Hint: start simulator with 'hf 14a fmcos sim -u %s -r %s'", sprint_hex_inrow(card.uid, card.uidlen), sprint_hex_inrow(card.ats, card.ats_len));
+
+    static char uidBuf[UTIL_BUFFER_SIZE_SPRINT] = {0};
+    static char atsBuf[UTIL_BUFFER_SIZE_SPRINT] = {0};
+    memset(uidBuf, 0x00, sizeof(uidBuf));
+    memset(atsBuf, 0x00, sizeof(atsBuf));
+    hex_to_buffer((uint8_t *)uidBuf, card.uid, card.uidlen, sizeof(uidBuf) - 1, 0, 0, true);
+    if (card.ats_len >= 3) { // a valid ATS consists of at least the length byte (TL) and 2 CRC bytes
+        if (card.ats_len == card.ats[0] + 2)
+            hex_to_buffer((uint8_t *)atsBuf, card.ats, card.ats[0], sizeof(atsBuf) - 1, 0, 0, true);
+            
+        else {
+            hex_to_buffer((uint8_t *)uidBuf, card.ats, card.ats_len, sizeof(uidBuf) - 1, 0, 0, true);
+        }
+        PrintAndLogEx(INFO, "Hint: start simulator with 'hf 14a fmcos sim -u %s -r %s'", uidBuf, atsBuf);
+    } else {
+        PrintAndLogEx(INFO, "Hint: start simulator with 'hf 14a fmcos sim -u %s -r UNKNOWN'", uidBuf);
+    }
+    
     return PM3_SUCCESS;
 fail:
     DropField();
