@@ -26,6 +26,10 @@ const char DF_7F03_AID[] = {
 const uint8_t DF_7F03_RESPONSE[] = {
     0x6F, 0x16, 0x84, 0x0E, 0xD5, 0xFD, 0xD4, 0xAA, 0xD6, 0xC7, 0xBB, 0xDB, 0xD2, 0xD7, 0xCD, 0xA8, 0x15, 0x01, 0xA5, 0x04, 0x9F, 0x08, 0x01, 0x02};
 
+const uint8_t DF_3F00_RESPONSE[] = {
+
+};
+
 void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *dynamic_response_info)
 {
 
@@ -48,12 +52,18 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
         Dbprintf("Received AID (%d):", aidLen);
         Dbhexdump(aidLen, receivedAid, false);
 
-        if (receivedCmd[4] == 0x00 && aidLen == 2 && receivedAid[0] == 0x7F && receivedAid[1] == 0x03)
+        if (receivedCmd[4] == 0x00 && aidLen == 2)
         {
-            // SELECT 7F03: DF
-            memcpy(dynamic_response_info->response + 2, DF_7F03_RESPONSE, sizeof DF_7F03_RESPONSE);
-            dynamic_response_info->response_n = sizeof DF_7F03_RESPONSE + 2;
-            return;
+            if (receivedAid[0] == 0x7F && receivedAid[1] == 0x03) {
+                // SELECT 7F03: DF
+                memcpy(dynamic_response_info->response + 2, DF_7F03_RESPONSE, sizeof DF_7F03_RESPONSE);
+                dynamic_response_info->response_n = sizeof DF_7F03_RESPONSE + 2;
+                return;
+            } else if (receivedAid[0] == 0x3F && receivedAid[1] == 0x00) {
+                memcpy(dynamic_response_info->response + 2, DF_3F00_RESPONSE, sizeof DF_3F00_RESPONSE);
+                dynamic_response_info->response_n = sizeof DF_3F00_RESPONSE + 2;
+                return;
+            }
         }
         else if (receivedCmd[4] == 0x04 && aidLen == sizeof DF_7F03_AID && memcmp(DF_7F03_AID, receivedAid, aidLen) == 0)
         {
@@ -61,12 +71,10 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
             dynamic_response_info->response_n = sizeof DF_7F03_RESPONSE + 2;
             return;
         }
-        else
-        { // Any other SELECT FILE command will return with a Not Found
-            dynamic_response_info->response[2] = 0x6A;
-            dynamic_response_info->response[3] = 0x82;
-            dynamic_response_info->response_n = 4;
-        }
+        // Any other SELECT FILE command will return with a Not Found
+        dynamic_response_info->response[2] = 0x6A;
+        dynamic_response_info->response[3] = 0x82;
+        dynamic_response_info->response_n = 4;
     }
     break;
     default:
