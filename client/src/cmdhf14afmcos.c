@@ -76,6 +76,7 @@ int SelectAndRead(const char sFileName[], const char sSelectCmd[], const char sR
     uint16_t sw = 0;
     int ret = 0;
 
+    PrintAndLogEx(INFO, "--- " _CYAN_("READ %s") " ----------------", sFileName);
     param_gethex_to_eol(sSelectCmd, 0, bufAPDU, sizeof(bufAPDU), &szAPDU);
     APDU_t decoded_APDU;
     if (APDUDecode(bufAPDU, szAPDU, &decoded_APDU) == 0)
@@ -121,7 +122,6 @@ int SelectAndRead(const char sFileName[], const char sSelectCmd[], const char sR
     PrintAndLogEx(INFO, "READ %s: success");
     PrintAndLogEx(NORMAL, "");
     print_buffer(response, *szResponse, 1);
-    PrintAndLogEx(INFO, "--- " _CYAN_("READ %s") " ----------------", sFileName);
     return PM3_SUCCESS;
 }
 
@@ -204,6 +204,7 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
     int szResponse = 0;
     uint16_t sw = 0;
 
+    PrintAndLogEx(INFO, "----------------- " _CYAN_("SELECT AID") " -----------------");
     param_gethex_to_eol("00A4 0000 02 7F03", 0, bufAPDU, sizeof(bufAPDU), &szAPDU);
     APDU_t decoded_APDU;
     if (APDUDecode(bufAPDU, szAPDU, &decoded_APDU) == 0)
@@ -225,14 +226,10 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
     uint8_t sw2 = (uint8_t)(0xff & sw);
     if (sw == ISO7816_OK || sw == ISO7816_INVALID_DF || sw == ISO7816_FILE_TERMINATED) {
         if (sw == ISO7816_OK) {
-            if (verbose)
-                PrintAndLogEx(SUCCESS, "Application " _CYAN_("7F03") " ( " _GREEN_("ok") " )");
+            PrintAndLogEx(SUCCESS, "Application " _CYAN_("7F03") " ( " _GREEN_("ok") " )");
         } else {
-            if (verbose)
-                PrintAndLogEx(WARNING, "Application " _CYAN_("7F03") " ( " _RED_("blocked") " )");
+            PrintAndLogEx(WARNING, "Application " _CYAN_("7F03") " ( " _RED_("blocked") " )");
         }
-        if (verbose)
-            PrintAndLogEx(INFO, "----------------- " _CYAN_("SELECT AID") " -----------------");
     } else {
         PrintAndLogEx(FAILED, "SELECT AID " _RED_("FAILED") ": %02X %02X", sw1, sw2);
         DropField();
@@ -242,9 +239,9 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
     ActivateField = false; // avoid resetting tag
 
     SelectAndRead("7F03/0001", "00A4 0000 02 0001", "00B0 0000 40", ActivateField, true, response, sizeof response, &szResponse);
-    SelectAndRead("7F03/00015", "00A4 0000 02 0015", "00B0 0000 60", ActivateField, true, response, sizeof response, &szResponse);
-    SelectAndRead("7F03/00015", "00A4 0000 02 0016", "00B0 0000 60", ActivateField, true, response, sizeof response, &szResponse);
-    SelectAndRead("7F03/00015", "00A4 0000 02 0019", "00B0 0000 40", ActivateField, true, response, sizeof response, &szResponse);
+    SelectAndRead("7F03/0015", "00A4 0000 02 0015", "00B0 0000 60", ActivateField, true, response, sizeof response, &szResponse);
+    SelectAndRead("7F03/0016", "00A4 0000 02 0016", "00B0 0000 60", ActivateField, true, response, sizeof response, &szResponse);
+    SelectAndRead("7F03/0019", "00A4 0000 02 0019", "00B0 0000 40", ActivateField, true, response, sizeof response, &szResponse);
     DropField();
     return PM3_SUCCESS;
 }
