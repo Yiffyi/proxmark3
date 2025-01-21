@@ -307,7 +307,6 @@ void SimulateFMCOSTag(uint8_t *uid,
         }
         else
         {
-            dynamic_response_info.response_n = dynamic_response_info.modulation_n = 0;
             PrepareDynamicResponse(receivedCmd, receivedCmdLen, &dynamic_response_info);
             p_response = &dynamic_response_info;
         }
