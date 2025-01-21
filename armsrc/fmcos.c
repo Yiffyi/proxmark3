@@ -138,8 +138,10 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
         Dbprintf("Received AID (%d):", aidLen);
         Dbhexdump(aidLen, receivedAid, false);
 
-        if (receivedCmd[4] == 0x00 && aidLen == 2) // select by iDF or iEF
+        if (receivedCmd[4] == 0x00 && receivedCmd[5] == 0x00) // select by iDF or iEF
         {
+            // if (aidLen == 2) {
+            // }
             uint16_t wanted = (((uint16_t)receivedAid[1]) << 8) | receivedAid[0];
             // check EF under curDF
             fmcos_ef *file = FMCOSEmlGetFile(curDF, wanted);
@@ -160,7 +162,7 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
                 return;
             }
         }
-        else if (receivedCmd[4] == 0x04)
+        else if (receivedCmd[4] == 0x04 && receivedCmd[5] == 0x00)
         {
             // try to match name
             fmcos_ef *file = FMCOSEmlGetDFByName(receivedAid, aidLen);
@@ -171,6 +173,12 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
                 curEF = 0x0000;
                 return;
             }
+        } else {
+            // Incorrect P1 or P2
+            resp->response[headerOffset] = 0x6A;
+            resp->response[headerOffset + 1] = 0x86;
+            resp->response_n = headerOffset + 2;
+            return;
         }
         // Any other SELECT FILE command will return with a Not Found
         resp->response[headerOffset] = 0x6A;
