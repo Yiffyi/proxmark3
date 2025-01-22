@@ -14,4 +14,5 @@ int CmdHF14AFMCOS(const char *Cmd);
 int CmdHF14AFMCOSSim(const char *Cmd);
 int CmdHF14AFMCOSInfo(const char *Cmd);
 int SelectAndRead(const char sFileName[], const char sSelectCmd[], const char sReadCmd[], bool activateField, bool keepFieldOn, uint8_t *response, size_t szResponseMax, int *szResponse);
+int SelectApplication(uint16_t iDF, bool activateField, bool keepFieldOn, uint8_t *response, size_t szResponseMax, int *szResponse, uint8_t *bufAid, int *szAid);
 #endif

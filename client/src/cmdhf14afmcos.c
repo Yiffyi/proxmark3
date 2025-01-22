@@ -168,7 +168,7 @@ int CmdHF14AFMCOSSim(const char *Cmd)
         PrintAndLogEx(ERR, "Please specify a 4 byte UID");
         return PM3_EINVARG;
     }
-    PrintAndLogEx(SUCCESS, "Emulating " _YELLOW_("ISO/IEC 14443 type A tag")" with " _GREEN_("%d byte UID (%s)"), uid_len, sprint_hex(uid, uid_len));
+    PrintAndLogEx(SUCCESS, "Emulating " _YELLOW_("FMCOS, ISO/IEC 14443 type A tag")" with " _GREEN_("%d byte UID (%s)"), uid_len, sprint_hex(uid, uid_len));
 
     if (rats_len <= 0) {
         PrintAndLogEx(ERR, "Please specify RATS");
@@ -231,7 +231,7 @@ int SelectAndRead(const char sFileName[], const char sSelectCmd[], const char sR
     }
 
     PrintAndLogEx(INFO, "SELECT %s: success");
-    TLVPrintFromBuffer(response, (*szResponse) - 2);
+    // TLVPrintFromBuffer(response, (*szResponse) - 2);
 
     param_gethex_to_eol(sReadCmd, 0, bufAPDU, sizeof(bufAPDU), &szAPDU);
     if (APDUDecode(bufAPDU, szAPDU, &decoded_APDU) == 0)
@@ -258,10 +258,62 @@ int SelectAndRead(const char sFileName[], const char sSelectCmd[], const char sR
     return PM3_SUCCESS;
 }
 
-// int SelectApplication(uint16_t iDF)
-// {
-    
-// }
+int SelectApplication(uint16_t iDF, bool activateField, bool keepFieldOn, uint8_t *response, size_t szResponseMax, int *szResponse, uint8_t *bufAid, int *szAid)
+{
+    uint8_t bufAPDU[80] = {0};
+    int szAPDU = 0;
+    uint16_t sw = 0;
+    *szAid = 0;
+
+    PrintAndLogEx(INFO, "----------------- " _CYAN_("SELECT AID") " -----------------");
+    param_gethex_to_eol("00A4 0000 02 0000", 0, bufAPDU, sizeof(bufAPDU), &szAPDU);
+    bufAPDU[szAPDU-2] = (uint8_t)(iDF >> 8);
+    bufAPDU[szAPDU-1] = (uint8_t)(0xff & iDF);
+    APDU_t decoded_APDU;
+    if (APDUDecode(bufAPDU, szAPDU, &decoded_APDU) == 0)
+        APDUPrint(decoded_APDU);
+    else
+        PrintAndLogEx(WARNING, "SELECT %04X: can't decode APDU.", iDF);
+
+    int ret = ExchangeAPDU14a(bufAPDU, szAPDU, activateField, keepFieldOn, response, szResponseMax, szResponse);
+    if (ret != PM3_SUCCESS) {
+        PrintAndLogEx(FAILED, "SELECT %04X: error %d", iDF, ret);
+        return ret;
+    }
+
+    sw = get_sw(response, *szResponse);
+    // param_gethex_to_eol("D5FDD4AAD6C7BBDBD2D7CDA81501", 0, AID, sizeof AID, &szAID);
+
+    uint8_t sw1 = (uint8_t)(sw >> 8);
+    uint8_t sw2 = (uint8_t)(0xff & sw);
+    if (sw == ISO7816_OK || sw == ISO7816_INVALID_DF || sw == ISO7816_FILE_TERMINATED) {
+        if (sw == ISO7816_OK) {
+            PrintAndLogEx(SUCCESS, "Application " _CYAN_("%04X") " ( " _GREEN_("ok") " )", iDF);
+        } else {
+            PrintAndLogEx(WARNING, "Application " _CYAN_("%04X") " ( " _RED_("blocked") " )", iDF);
+            return PM3_EFAILED;
+        }
+    } else {
+        PrintAndLogEx(FAILED, "SELECT AID " _RED_("FAILED") ": %02X %02X", sw1, sw2);
+        return PM3_EFAILED;
+    }
+
+    struct tlvdb *t = tlvdb_parse_multi(response, *szResponse - 2);
+    if (t) {
+        PrintAndLogEx(INFO, "-------------------- " _CYAN_("TLV decoded") " --------------------");
+
+        TLVPrintFromTLVLev(t, 0);
+        struct tlvdb *ttmp = tlvdb_find(t, 0x6f);
+        const struct tlv *tgAID = tlvdb_get_inchild(ttmp, 0x84, NULL);
+        memcpy(bufAid, tgAID->value, tgAID->len);
+        *szAid = tgAID->len;
+        tlvdb_free(t);
+        return PM3_SUCCESS;
+    } else {
+        PrintAndLogEx(WARNING, "TLV ERROR: Can't parse response as TLV tree.");
+        return PM3_ESOFT;
+    }
+}
 
 
 int CmdHF14AFMCOSInfo(const char *Cmd)
@@ -345,50 +397,25 @@ int CmdHF14AFMCOSInfo(const char *Cmd)
     }
     bool ActivateField = true;
 
-
-    uint8_t bufAPDU[80] = {0};
-    int szAPDU = 0;
     uint8_t response[1024] = {0};
+    uint8_t bufAid[64] = {0};
     int szResponse = 0;
-    uint16_t sw = 0;
+    int szAid = 0;
 
-    PrintAndLogEx(INFO, "----------------- " _CYAN_("SELECT AID") " -----------------");
-    param_gethex_to_eol("00A4 0000 02 7F03", 0, bufAPDU, sizeof(bufAPDU), &szAPDU);
-    APDU_t decoded_APDU;
-    if (APDUDecode(bufAPDU, szAPDU, &decoded_APDU) == 0)
-        APDUPrint(decoded_APDU);
-    else
-        PrintAndLogEx(WARNING, "SELECT 7F03: can't decode APDU.");
-
-    int ret = ExchangeAPDU14a(bufAPDU, szAPDU, ActivateField, true, response, sizeof response, &szResponse);
-    if (ret != PM3_SUCCESS) {
-        PrintAndLogEx(FAILED, "SELECT 7F03: error %d", ret);
-        goto fail;
-    }
-
-    sw = get_sw(response, szResponse);
-    // param_gethex_to_eol("D5FDD4AAD6C7BBDBD2D7CDA81501", 0, AID, sizeof AID, &szAID);
-
-    uint8_t sw1 = (uint8_t)(sw >> 8);
-    uint8_t sw2 = (uint8_t)(0xff & sw);
-    if (sw == ISO7816_OK || sw == ISO7816_INVALID_DF || sw == ISO7816_FILE_TERMINATED) {
-        if (sw == ISO7816_OK) {
-            PrintAndLogEx(SUCCESS, "Application " _CYAN_("7F03") " ( " _GREEN_("ok") " )");
-        } else {
-            PrintAndLogEx(WARNING, "Application " _CYAN_("7F03") " ( " _RED_("blocked") " )");
-            goto fail;
-        }
-    } else {
-        PrintAndLogEx(FAILED, "SELECT AID " _RED_("FAILED") ": %02X %02X", sw1, sw2);
-        goto fail;
-    }
-
+    SelectApplication(0x3F00, ActivateField, true, response, sizeof response, &szResponse, bufAid, &szAid);
     if (loadEml) {
         if (FMCOSEmlMemClr() != PM3_SUCCESS) goto fail;
-        if (FMCOSEmlMemAdd(0x7F03, 0x0000, szResponse, response) != PM3_SUCCESS) goto fail;
+        if (FMCOSEmlMemAdd(0x3F00, 0x0000, szResponse, response) != PM3_SUCCESS) goto fail;
+        if (FMCOSEmlMemAdd(0x3F00, 0xFFFF, szAid, bufAid) != PM3_SUCCESS) goto fail;
     }
 
     ActivateField = false; // avoid resetting tag
+    SelectApplication(0x7F03, ActivateField, true, response, sizeof response, &szResponse, bufAid, &szAid);
+    if (loadEml) {
+        if (FMCOSEmlMemAdd(0x7F03, 0x0000, szResponse, response) != PM3_SUCCESS) goto fail;
+        if (FMCOSEmlMemAdd(0x7F03, 0xFFFF, szAid, bufAid) != PM3_SUCCESS) goto fail;
+    }
+
 
     SelectAndRead("7F03/0001", "00A4 0000 02 0001", "00B0 0000 40", ActivateField, true, response, sizeof response, &szResponse);
     if (loadEml) {
