@@ -18,10 +18,10 @@
 // #define DYNAMIC_RESPONSE_BUFFER_SIZE 64
 // #define DYNAMIC_MODULATION_BUFFER_SIZE 512
 
-#define STATE_NONE 0
-#define STATE_HALTED 5
-#define STATE_WUPA 6
-#define STATE_AUTH 7
+#define STATE_IDLE      0
+#define STATE_READY     1
+#define STATE_ACTIVE    2
+#define STATE_ISO14443A 3
 
 static uint16_t curDF = 0x3F00;
 static uint16_t curEF = 0x0000;
@@ -206,12 +206,17 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respons
         fmcos_ef *file = NULL;
         if ((p1 & 0xE0) == 0x80) {
             iEF = p1 & 0x1F;
-            file = FMCOSEmlGetFile(curDF, iEF);
             offset = p2;
         } else {
             iEF = curEF;
             file = curFile;
             offset = (p1 << 8) | p2;
+        }
+
+        if (iEF == curEF) {
+            file = curFile;
+        } else {
+            file = FMCOSEmlGetFile(curDF, iEF);
         }
 
         if (file) {
@@ -244,12 +249,13 @@ ret:
     return;
 }
 
-void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp)
+bool PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_response_info_t *resp)
 {
 
     // clear old dynamic responses
     resp->response_n = 0;
     resp->modulation_n = 0;
+    bool selected = true;
 
     // Check for ISO 14443A-4 compliant commands, look at left nibble
     switch (receivedCmd[0])
@@ -306,6 +312,7 @@ void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respon
         resp->response[0] = 0xCA;
         resp->response[1] = 0x00;
         resp->response_n = 2;
+        selected = false;
     }
     break;
 
@@ -339,6 +346,8 @@ void PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, tag_respon
                 DbpString("Error preparing tag response");
         }
     }
+
+    return selected;
 }
 
 void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
@@ -386,8 +395,8 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
 
     int retval = 0;
     int cmdsRecvd = 0;
-    bool odd_reply = true;
     bool finished = false;
+    int state = STATE_IDLE, next_state = STATE_IDLE;
 
 
     uint32_t nonce = 0;
@@ -411,75 +420,121 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
         // tUart14a *Uart = GetUart14a();
         // LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
 
-        if (receivedCmd[0] == ISO14443A_CMD_REQA && receivedCmdLen == 1)
-        { // Received a REQUEST, but in HALTED, skip
-            odd_reply = !odd_reply;
-            if (odd_reply)
+        switch (state)
+        {
+        case STATE_IDLE:
+            if (receivedCmd[0] == ISO14443A_CMD_REQA && receivedCmdLen == 1)
             {
                 p_response = &responses[RESP_INDEX_ATQA];
             }
-        }
-        else if (receivedCmd[0] == ISO14443A_CMD_WUPA && receivedCmdLen == 1)
-        { // Received a WAKEUP
-            p_response = &responses[RESP_INDEX_ATQA];
-        }
-        else if (receivedCmd[1] == 0x20 && receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT && receivedCmdLen == 2)
-        { // Received request for UID (cascade 1)
-            p_response = &responses[RESP_INDEX_UIDC1];
-        }
-        else if (receivedCmd[1] == 0x20 && receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT_2 && receivedCmdLen == 2)
-        { // Received request for UID (cascade 2)
-            p_response = &responses[RESP_INDEX_UIDC2];
-        }
-        else if (receivedCmd[1] == 0x20 && receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT_3 && receivedCmdLen == 2)
-        { // Received request for UID (cascade 3)
-            p_response = &responses[RESP_INDEX_UIDC3];
-        }
-        else if (receivedCmd[1] == 0x70 && receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT && receivedCmdLen == 9)
-        { // Received a SELECT (cascade 1)
-            p_response = &responses[RESP_INDEX_SAKC1];
-        }
-        else if (receivedCmd[1] == 0x70 && receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT_2 && receivedCmdLen == 9)
-        { // Received a SELECT (cascade 2)
-            p_response = &responses[RESP_INDEX_SAKC2];
-        }
-        else if (receivedCmd[1] == 0x70 && receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT_3 && receivedCmdLen == 9)
-        { // Received a SELECT (cascade 3)
-            p_response = &responses[RESP_INDEX_SAKC3];
-        }
-        else if (receivedCmd[0] == ISO14443A_CMD_PPS)
-        {
-            p_response = &responses[RESP_INDEX_PPS];
-        }
-        else if (receivedCmd[0] == ISO14443A_CMD_HALT && receivedCmdLen == 4)
-        { // Received a HALT
-            p_response = NULL;
-            // order = ORDER_HALTED;
-        }
-        else if (receivedCmd[0] == ISO14443A_CMD_RATS && receivedCmdLen == 4)
-        { // Received a RATS request
-            p_response = &responses[RESP_INDEX_RATS];
-        } else if ((receivedCmd[0] == MIFARE_AUTH_KEYA || receivedCmd[0] == MIFARE_AUTH_KEYB) && receivedCmdLen == 4) {    // Received an authentication request
-            // cardAUTHKEY = receivedCmd[0] - 0x60;
-            // cardAUTHSC = receivedCmd[1] / 4; // received block num
+            else if (receivedCmd[0] == ISO14443A_CMD_WUPA && receivedCmdLen == 1)
+            { // Received a WAKEUP
+                p_response = &responses[RESP_INDEX_ATQA];
+            }
 
-            // incease nonce at AUTH requests. this is time consuming.
-            nonce = prng_successor(GetTickCount(), 32);
-            num_to_bytes(nonce, 4, dynamic_response_info.response);
-            dynamic_response_info.response_n = 4;
+            if (p_response) {
+                next_state = STATE_READY;
+            } else {
+                next_state = STATE_IDLE;
+            }
+            break;
+        case STATE_READY:
+            if (receivedCmd[1] == 0x20) { // ANTICOLL
+                if (receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT && receivedCmdLen == 2)
+                { // Received request for UID (cascade 1)
+                    p_response = &responses[RESP_INDEX_UIDC1];
+                }
+                else if (receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT_2 && receivedCmdLen == 2)
+                { // Received request for UID (cascade 2)
+                    p_response = &responses[RESP_INDEX_UIDC2];
+                }
+                else if (receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT_3 && receivedCmdLen == 2)
+                { // Received request for UID (cascade 3)
+                    p_response = &responses[RESP_INDEX_UIDC3];
+                }
 
-            prepare_tag_modulation(&dynamic_response_info, DYNAMIC_MODULATION_BUFFER2_SIZE);
-            p_response = &dynamic_response_info;
-            // order = ORDER_AUTH;
+                if (p_response) {
+                    next_state = STATE_READY;
+                } else {
+                    next_state = STATE_IDLE;
+                }
+            } else if (receivedCmd[1] == 0x70) { // SELECT
+                if (receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT && receivedCmdLen == 9)
+                { // Received a SELECT (cascade 1)
+                    p_response = &responses[RESP_INDEX_SAKC1];
+                }
+                else if (receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT_2 && receivedCmdLen == 9)
+                { // Received a SELECT (cascade 2)
+                    p_response = &responses[RESP_INDEX_SAKC2];
+                }
+                else if (receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT_3 && receivedCmdLen == 9)
+                { // Received a SELECT (cascade 3)
+                    p_response = &responses[RESP_INDEX_SAKC3];
+                }
+
+                if (p_response) {
+                    next_state = STATE_ACTIVE;
+                } else {
+                    next_state = STATE_IDLE;
+                }
+            } else {
+                next_state = STATE_IDLE;
+            }
+
+            break;
+        case STATE_ACTIVE:
+            if (receivedCmd[0] == ISO14443A_CMD_HALT && receivedCmdLen == 4)
+            {   // Received a HALT
+                p_response = NULL;
+                next_state = STATE_IDLE;
+            }
+            else if (receivedCmd[0] == ISO14443A_CMD_RATS && receivedCmdLen == 4)
+            { // Received a RATS request
+                p_response = &responses[RESP_INDEX_RATS];
+                next_state = STATE_ISO14443A;
+            } else {
+                next_state = STATE_ACTIVE;
+            }
+
+            if ((receivedCmd[0] == MIFARE_AUTH_KEYA || receivedCmd[0] == MIFARE_AUTH_KEYB) && receivedCmdLen == 4) {    // Received an authentication request
+                // cardAUTHKEY = receivedCmd[0] - 0x60;
+                // cardAUTHSC = receivedCmd[1] / 4; // received block num
+
+                // incease nonce at AUTH requests. this is time consuming.
+                nonce = prng_successor(GetTickCount(), 32);
+                num_to_bytes(nonce, 4, dynamic_response_info.response);
+                dynamic_response_info.response_n = 4;
+
+                prepare_tag_modulation(&dynamic_response_info, DYNAMIC_MODULATION_BUFFER2_SIZE);
+                p_response = &dynamic_response_info;
+                // order = ORDER_AUTH;
+            }
+            break;
+        case STATE_ISO14443A:
+            next_state = STATE_ISO14443A;
+            if (receivedCmd[0] == ISO14443A_CMD_PPS)
+            {
+                p_response = &responses[RESP_INDEX_PPS];
+            }
+            else
+            {
+                if (PrepareDynamicResponse(receivedCmd, receivedCmdLen, &dynamic_response_info)) {
+                    next_state = STATE_ISO14443A;
+                } else {
+                    next_state = STATE_IDLE;
+                }
+                p_response = &dynamic_response_info;
+            }
+            break;
+        default:
+            break;
         }
-        else
-        {
-            PrepareDynamicResponse(receivedCmd, receivedCmdLen, &dynamic_response_info);
-            p_response = &dynamic_response_info;
-        }
+
         cmdsRecvd++;
         // Send response
         EmSendPrecompiledCmd(p_response);
+
+        state = next_state;
     }
 
     switch_off();
