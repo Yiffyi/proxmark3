@@ -96,7 +96,7 @@ fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName)
         if (t->iDF != 0 && ef_checksum(t)) {
             if (t->iEF == 0xFFFF && szName == t->szData && memcmp(name, t->bData, szName) == 0) {
                 Dbprintf("SUCCESS: Found DF %04X from eml mem", t->iDF);
-                return t;
+                return FMCOSEmlGetFile(t->iDF, 0x0000);
             } else {
                 offset += sizeof(fmcos_ef) + t->szData;
             }
