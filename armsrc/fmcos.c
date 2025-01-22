@@ -237,6 +237,36 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp 
         }
     }
     break;
+    case 0x84:
+    {
+        // GET CHALLENGE
+        if (p1 == 0x00 && p2 == 0x00 && receivedCmdLen == 5) {
+            // Get challenge
+            uint8_t le = receivedCmd[4];
+            uint32_t r1 = prng_successor(GetTickCount(), 32), r2 = prng_successor(GetTickCount(), 32);
+            
+            if (le == 4) {
+                num_to_bytes(r1, 4, resp->data);
+                resp->len = 4;
+            } else if (le == 8) {
+                num_to_bytes(r1, 4, resp->data);
+                num_to_bytes(r2, 4, resp->data+4);
+                resp->len = 8;
+            } else {
+                sw1 = 0x67;
+                sw2 = 0x00;
+                goto addSW;
+            }
+            sw1 = 0x90;
+            sw2 = 0x00;
+            goto addSW;
+        } else {
+            // Incorrect P1 or P2
+            sw1 = 0x6A; sw2 = 0x86;
+            goto addSW;
+        }
+    }
+    break;
     }
 
 addSW:
