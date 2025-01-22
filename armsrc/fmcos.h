@@ -30,7 +30,7 @@ fmcos_ef* FMCOSEmlGetFile(uint16_t iDF, uint16_t iEF);
 fmcos_ef* FMCOSEmlGetDFByName(uint8_t *name, uint8_t szName);
 
 void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp *resp);
-bool PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp *resp);
+fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uint8_t CID, uint8_t FSDI, bool reset);
 void SimulateFMCOSTag(uint8_t *uid,
                       uint8_t *iRATs, size_t irats_len);
 #endif /* __FMCOS_H */

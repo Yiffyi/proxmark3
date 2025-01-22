@@ -18,6 +18,8 @@
 // #define DYNAMIC_RESPONSE_BUFFER_SIZE 64
 // #define DYNAMIC_MODULATION_BUFFER_SIZE 512
 
+#define FSDI_MAX 8
+
 #define STATE_IDLE      0
 #define STATE_READY     1
 #define STATE_ACTIVE    2
@@ -26,6 +28,7 @@
 static uint16_t curDF = 0x3F00;
 static uint16_t curEF = 0x0000;
 static fmcos_ef *curFile = NULL;
+const uint16_t FSD[] = {16, 24, 32, 40, 48, 64, 96, 128, 256};
 
 static bool ef_checksum(const fmcos_ef* ef)
 {
@@ -125,7 +128,7 @@ void FMCOSEmlList(void)
 
 void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp *resp)
 {
-
+    resp->len = 0;
     uint8_t sw1 = 0x90, sw2 = 0x00;
     switch (receivedCmd[3])
     { // APDU Class Byte
@@ -166,8 +169,8 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp 
             // check DF
             file = FMCOSEmlGetFile(wanted, 0x0000);
             if (file) {
-                memcpy(resp->data + resp->len, file->bData, file->szData);
-                resp->len += file->szData;
+                memcpy(resp->data, file->bData, file->szData);
+                resp->len = file->szData;
                 curDF = file->iDF;
                 curEF = 0x0000;
                 curFile = NULL;
@@ -179,8 +182,8 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp 
             // try to match name
             fmcos_ef *file = FMCOSEmlGetDFByName(receivedAid, aidLen);
             if (file) {
-                memcpy(resp->data + resp->len, file->bData, file->szData);
-                resp->len += file->szData;
+                memcpy(resp->data, file->bData, file->szData);
+                resp->len = file->szData;
                 curDF = file->iDF;
                 curEF = 0x0000;
                 curFile = NULL;
@@ -224,10 +227,10 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp 
                 goto addSW;
             }
 
-            memcpy(resp->data + resp->len, file->bData + offset, le);
+            memcpy(resp->data, file->bData + offset, le);
             sw1 = 0x90;
             sw2 = 0x00;
-            resp->len += le;
+            resp->len = le;
             goto addSW;
         } else {
             sw1 = 0x6A;
@@ -248,70 +251,100 @@ ret:
     return;
 }
 
-bool PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp *resp)
+fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uint8_t CID, uint8_t FSDI, bool reset)
 {
+    static uint8_t bufInfoFrame[FMCOS_RESPONSE_BUFFER_SIZE];
+    static fmcos_resp infoFrame = {
+        .len = 0,
+        .data = bufInfoFrame
+    };
+    static uint16_t nInfoFrameSent = 0;
+    static uint16_t nInfoFrameInAir = 0;
 
-    // clear old dynamic responses
-    resp->len = 0;
-    bool selected = true;
+    static uint8_t bufBlock[FMCOS_RESPONSE_BUFFER_SIZE];
+    static fmcos_resp fullBlock = {
+        .len = 0,
+        .data = bufBlock
+    };
+    static uint8_t iCurBlock = 1;
 
+    if (reset) {
+        infoFrame.len = 0;
+        nInfoFrameSent = 0;
+        nInfoFrameInAir = 0;
+        fullBlock.len = 0;
+        iCurBlock = 1;
+        return NULL;
+    }
+
+    bool resendLast = false;
+    uint16_t infoFrameRemain = infoFrame.len - nInfoFrameSent;
     // Check for ISO 14443A-4 compliant commands, look at left nibble
-    switch (receivedCmd[0])
+
+    uint8_t iRecvBlock = receivedCmd[0] & 0x01;
+
+    switch (receivedCmd[0] & 0xC0)
     {
-    case 0x02:
-    case 0x03:
-    { // IBlock (command no CID)
-        resp->data[0] = receivedCmd[0];
+    case 0x00: // I
+    {
+        iCurBlock ^= 1;
+        fullBlock.data[0] = (receivedCmd[0] & 0xEE) | iCurBlock; // copy but not chained bit
         // resp->data[1] = 0x90;
         // resp->data[2] = 0x00;
-        resp->len = 1;
-        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, resp);
-    }
-    break;
-    case 0x0B:
-    case 0x0A:
-    { // IBlock (command CID)
-        resp->data[0] = receivedCmd[0];
-        resp->data[1] = receivedCmd[1];
-        // resp->data[2] = 0x90;
-        // resp->data[3] = 0x00;
-        resp->len = 2;
-        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, resp);
+        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, &infoFrame);
+        nInfoFrameSent = 0;
+        nInfoFrameInAir = 0;
+
+        // fullBlock.data[0] = 0xaa | ((receivedCmd[0]) & 1);
+        // fullBlock.data[1] = receivedCmd[1];
+        // fullBlock.len = 2;
+        // infoFrame.len = 0;
+        // nInfoFrameSent = 0;
+        // nInfoFrameInAir = 0;
     }
     break;
 
-    case 0x1A:
-    case 0x1B:
-    { // Chaining command
-        resp->data[0] = 0xaa | ((receivedCmd[0]) & 1);
-        resp->len = 2;
-    }
-    break;
-
-    case 0xAA:
-    case 0xBB:
+    case 0xB0: // R
     {
-        resp->data[0] = receivedCmd[0] ^ 0x11;
-        resp->len = 2;
+        if ((receivedCmd[0] & 0xF0) == 0xA0) { // R(ACK)
+            if (iRecvBlock != iCurBlock)  {
+                iCurBlock ^= 1;
+                if (infoFrameRemain > 0) { // send next
+                    fullBlock.data[0] = 0x12 | iCurBlock; // chained I
+                    nInfoFrameSent += nInfoFrameInAir;
+                    nInfoFrameInAir = 0;
+                }
+            } else {
+                resendLast = true;
+                // send again
+            }
+
+        } else if ((receivedCmd[0] & 0xF0) == 0xB0) { // R(NAK)
+            if (iRecvBlock != iCurBlock)  { // send R(ACK)
+                fullBlock.data[0] = 0xA2 | iCurBlock;
+                infoFrame.len = 0;
+                nInfoFrameSent = 0;
+                nInfoFrameInAir = 0;
+            } else {
+                resendLast = true;
+                // send again
+            }
+
+        }
     }
     break;
-
-    case 0xBA:
-    { // ping / pong
-        resp->data[0] = 0xAB;
-        resp->data[1] = 0x00;
-        resp->len = 2;
+    case 0xC0: // S
+    {
+        // S(DESELECT) or S(WTX) ?
+        fullBlock.data[0] = 0xCA;
+        // fullBlock.data[1] = 0x00;
+        // fullBlock.len = 2;
     }
-    break;
-
-    case 0xCA:
-    case 0xC2:
-    { // Readers sends deselect command
-        resp->data[0] = 0xCA;
-        resp->data[1] = 0x00;
-        resp->len = 2;
-        selected = false;
-    }
+    // case 0xCA:
+    // case 0xC2:
+    // { // Readers sends deselect command
+    //     selected = false;
+    // }
     break;
 
     default:
@@ -322,30 +355,59 @@ bool PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp
             Dbhexdump(receivedCmdLen, receivedCmd, false);
         }
         // Do not respond
-        resp->len = 0;
-        // order = ORDER_NONE; // back to work state
+        fullBlock.len = 0;
     }
     break;
     }
 
+    if (resendLast) {
+        return fullBlock.len > 0 ? &fullBlock : NULL;
+    }
 
-    if (resp->len > 0)
+    if (receivedCmd[0] & 0x08) { // follow CID
+        fullBlock.data[0] = (fullBlock.data[0] & 0xF7) | 0x08;
+        fullBlock.data[1] = receivedCmd[1];
+        fullBlock.len = 2;
+    } else {
+        fullBlock.data[0] = fullBlock.data[0] & 0xF7;
+        fullBlock.len = 1;
+    }
+
+    infoFrameRemain = infoFrame.len - nInfoFrameSent;
+    if (infoFrameRemain > 0)
     {
-        // Copy the CID from the reader query???
-        // resp->data[1] = receivedCmd[1];
+        if (fullBlock.len + infoFrameRemain + 2 > FSD[FSDI]) {
+            fullBlock.data[0] |= 0x10; // chained I
+            memcpy(fullBlock.data + fullBlock.len, infoFrame.data + nInfoFrameSent, FSD[FSDI]);
+            fullBlock.len += FSD[FSDI];
+            nInfoFrameInAir = FSD[FSDI];
+        } else {
+            fullBlock.data[0] &= 0xEF; // I
+            memcpy(fullBlock.data + fullBlock.len, infoFrame.data + nInfoFrameSent, infoFrameRemain);
+            fullBlock.len += infoFrameRemain;
 
+            infoFrame.len = 0;
+            nInfoFrameSent = 0;
+            nInfoFrameInAir = 0;
+        }
         // Add CRC bytes, always used in ISO 14443A-4 compliant cards
-        AddCrc14A(resp->data, resp->len);
-        resp->len += 2;
+        AddCrc14A(fullBlock.data, fullBlock.len);
+        fullBlock.len += 2;
+        return &fullBlock;
 
         // if (prepare_tag_modulation(resp, DYNAMIC_MODULATION_BUFFER2_SIZE) == false)
         // {
         //     if (g_dbglevel >= DBG_DEBUG)
         //         DbpString("Error preparing tag response");
         // }
+    } else if (fullBlock.len > 0) { // no infoFrame
+        // Add CRC bytes, always used in ISO 14443A-4 compliant cards
+        AddCrc14A(fullBlock.data, fullBlock.len);
+        fullBlock.len += 2;
+        return &fullBlock;
+    } else {
+        return NULL;
     }
-
-    return selected;
 }
 
 void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
@@ -364,10 +426,10 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
     // free eventually allocated BigBuf memory but keep Emulator Memory
     BigBuf_free_keep_EM();
 
-    fmcos_resp dynamicResp = {
-        .len = 0,
-        .data = BigBuf_calloc(FMCOS_RESPONSE_BUFFER_SIZE)
-    };
+    // fmcos_resp dynamicResp = {
+    //     .len = 0,
+    //     .data = BigBuf_calloc(FMCOS_RESPONSE_BUFFER_SIZE)
+    // };
 
     uint8_t tagType = 4;
     uint16_t flags = 0;
@@ -388,12 +450,14 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
     set_tracing(true);
 
     int retval = 0;
-    int cmdsRecvd = 0;
+    // int cmdsRecvd = 0;
     bool finished = false;
     int state = STATE_IDLE, next_state = STATE_IDLE;
 
 
-    uint32_t nonce = 0;
+    uint8_t CID = 1, FSDI = 0;
+
+    // uint32_t nonce = 0;
     // uint8_t cardAUTHSC = 0;
     // uint8_t cardAUTHKEY = 0xff;  // no authentication
     while (finished == false)
@@ -401,7 +465,8 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
         // BUTTON_PRESS check done in GetIso14443aCommandFromReader
         WDT_HIT();
         tag_response_info_t *p_response = NULL;
-        dynamicResp.len = 0;
+        fmcos_resp *dynamicResp = NULL;
+        // dynamicResp.len = 0;
 
         // Clean receive command buffer
         if (GetIso14443aCommandFromReader(receivedCmd, sizeof(receivedCmd), receivedCmdPar, &receivedCmdLen) == false)
@@ -418,6 +483,8 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
         {
         case STATE_IDLE:
             LED_A_ON();
+            FSDI = 0; CID = 1;
+            PrepareDynamicResponse(receivedCmd, receivedCmdLen, CID, FSDI, true); // reset
             if (receivedCmd[0] == ISO14443A_CMD_REQA && receivedCmdLen == 1)
             {
                 p_response = &responses[RESP_INDEX_ATQA];
@@ -489,36 +556,43 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
             } else if (receivedCmd[0] == ISO14443A_CMD_RATS && receivedCmdLen == 4)
             { // Received a RATS request
                 p_response = &responses[RESP_INDEX_RATS];
+                // {FSDI, CID}
+                FSDI = receivedCmd[1] >> 4;
+                CID = receivedCmd[1] & 0x0F;
+
+                if (FSDI > FSDI_MAX) {
+                    FSDI = FSDI_MAX;
+                }
             } else if (receivedCmd[0] == ISO14443A_CMD_PPS) {
                 p_response = &responses[RESP_INDEX_PPS];
+            } else if ((receivedCmd[0] & 0xF0) == 0xC0) { // DESELECT
+                p_response = NULL;
+                next_state = STATE_IDLE;
             } else if ((receivedCmd[0] == MIFARE_AUTH_KEYA || receivedCmd[0] == MIFARE_AUTH_KEYB) && receivedCmdLen == 4) {    // Received an authentication request
-                // cardAUTHKEY = receivedCmd[0] - 0x60;
-                // cardAUTHSC = receivedCmd[1] / 4; // received block num
+            //     // cardAUTHKEY = receivedCmd[0] - 0x60;
+            //     // cardAUTHSC = receivedCmd[1] / 4; // received block num
 
-                // incease nonce at AUTH requests. this is time consuming.
-                nonce = prng_successor(GetTickCount(), 32);
-                num_to_bytes(nonce, 4, dynamicResp.data);
-                dynamicResp.len = 4;
+            //     // incease nonce at AUTH requests. this is time consuming.
+            //     nonce = prng_successor(GetTickCount(), 32);
+            //     num_to_bytes(nonce, 4, dynamicResp.data);
+            //     dynamicResp.len = 4;
 
                 p_response = NULL;
-                // order = ORDER_AUTH;
-            } else {
-                if (PrepareDynamicResponse(receivedCmd, receivedCmdLen, &dynamicResp)) {
-                    next_state = STATE_ACTIVE;
-                } else {
-                    next_state = STATE_IDLE;
-                }
+            //     // order = ORDER_AUTH;
+            }
+            else {
+                dynamicResp = PrepareDynamicResponse(receivedCmd, receivedCmdLen, CID, FSDI, false);
             }
             break;
         default:
             break;
         }
 
-        cmdsRecvd++;
+        // cmdsRecvd++;
 
         // Send response
-        if (dynamicResp.len > 0) {
-            EmSendCmd(dynamicResp.data, dynamicResp.len);
+        if (dynamicResp) {
+            EmSendCmd(dynamicResp->data, dynamicResp->len);
         } else if (p_response) {
             EmSendPrecompiledCmd(p_response);
         } else {
@@ -540,12 +614,12 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
     set_tracing(false);
     BigBuf_free_keep_EM();
 
-    if (g_dbglevel >= DBG_EXTENDED)
-    {
-        //        Dbprintf("-[ Wake ups after halt  [%d]", happened);
-        //        Dbprintf("-[ Messages after halt  [%d]", happened2);
-        Dbprintf("-[ Num of received cmd  [%d]", cmdsRecvd);
-    }
+    // if (g_dbglevel >= DBG_EXTENDED)
+    // {
+    //     //        Dbprintf("-[ Wake ups after halt  [%d]", happened);
+    //     //        Dbprintf("-[ Messages after halt  [%d]", happened2);
+    //     Dbprintf("-[ Num of received cmd  [%d]", cmdsRecvd);
+    // }
 
     reply_ng(CMD_HF_ISO14443A_FMCOS_SIMULATE, retval, NULL, 0);
 }
