@@ -480,20 +480,18 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
             break;
         case STATE_ACTIVE:
             LED_C_ON();
+            next_state = STATE_ACTIVE;
+            p_response = NULL;
             if (receivedCmd[0] == ISO14443A_CMD_HALT && receivedCmdLen == 4)
             {   // Received a HALT
                 p_response = NULL;
                 next_state = STATE_IDLE;
-            }
-            else if (receivedCmd[0] == ISO14443A_CMD_RATS && receivedCmdLen == 4)
+            } else if (receivedCmd[0] == ISO14443A_CMD_RATS && receivedCmdLen == 4)
             { // Received a RATS request
                 p_response = &responses[RESP_INDEX_RATS];
-                next_state = STATE_ISO14443A;
-            } else {
-                next_state = STATE_ACTIVE;
-            }
-
-            if ((receivedCmd[0] == MIFARE_AUTH_KEYA || receivedCmd[0] == MIFARE_AUTH_KEYB) && receivedCmdLen == 4) {    // Received an authentication request
+            } else if (receivedCmd[0] == ISO14443A_CMD_PPS) {
+                p_response = &responses[RESP_INDEX_PPS];
+            } else if ((receivedCmd[0] == MIFARE_AUTH_KEYA || receivedCmd[0] == MIFARE_AUTH_KEYB) && receivedCmdLen == 4) {    // Received an authentication request
                 // cardAUTHKEY = receivedCmd[0] - 0x60;
                 // cardAUTHSC = receivedCmd[1] / 4; // received block num
 
@@ -504,23 +502,12 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
 
                 p_response = NULL;
                 // order = ORDER_AUTH;
-            }
-            break;
-        case STATE_ISO14443A:
-            LED_D_ON();
-            next_state = STATE_ISO14443A;
-            if (receivedCmd[0] == ISO14443A_CMD_PPS)
-            {
-                p_response = &responses[RESP_INDEX_PPS];
-            }
-            else
-            {
+            } else {
                 if (PrepareDynamicResponse(receivedCmd, receivedCmdLen, &dynamicResp)) {
-                    next_state = STATE_ISO14443A;
+                    next_state = STATE_ACTIVE;
                 } else {
                     next_state = STATE_IDLE;
                 }
-                p_response = NULL;
             }
             break;
         default:
