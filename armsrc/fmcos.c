@@ -487,6 +487,17 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
         tUart14a *Uart = GetUart14a();
         // LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
 
+
+        // we don't detect if PCD has turned off the field,
+        // so we assume this means PCD has restarted the field
+        if (receivedCmd[0] == ISO14443A_CMD_WUPA && receivedCmdLen == 1) {
+            LED_A_ON();
+            LED_B_OFF();
+            LED_C_OFF();
+            LED_D_OFF();
+            state = STATE_IDLE;
+        }
+
         switch (state)
         {
         case STATE_IDLE:
