@@ -376,11 +376,12 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
     infoFrameRemain = infoFrame.len - nInfoFrameSent;
     if (infoFrameRemain > 0)
     {
-        if (fullBlock.len + infoFrameRemain + 2 > FSD[FSDI]) {
+        uint16_t encap = fullBlock.len + 2;
+        if (infoFrameRemain + encap > FSD[FSDI]) {
             fullBlock.data[0] |= 0x10; // chained I
-            memcpy(fullBlock.data + fullBlock.len, infoFrame.data + nInfoFrameSent, FSD[FSDI]);
-            fullBlock.len += FSD[FSDI];
-            nInfoFrameInAir = FSD[FSDI];
+            memcpy(fullBlock.data + fullBlock.len, infoFrame.data + nInfoFrameSent, FSD[FSDI] - encap);
+            fullBlock.len += FSD[FSDI] - encap;
+            nInfoFrameInAir = FSD[FSDI] - encap;
         } else {
             fullBlock.data[0] &= 0xEF; // I
             memcpy(fullBlock.data + fullBlock.len, infoFrame.data + nInfoFrameSent, infoFrameRemain);
