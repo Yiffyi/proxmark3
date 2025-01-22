@@ -129,12 +129,9 @@ void FMCOSEmlList(void)
 void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp *resp)
 {
     resp->len = 0;
-    uint8_t sw1 = 0x90, sw2 = 0x00;
-    switch (receivedCmd[3])
-    { // APDU Class Byte
-      // receivedCmd in this case is expecting to structured with a CID, then the APDU command for SelectFile
-      // | IBlock (CID) | CID | APDU Command | CRC |
-
+    uint8_t sw1 = 0x90, sw2 = 0x00, cla = receivedCmd[0], ins = receivedCmd[1], p1 = receivedCmd[2], p2 = receivedCmd[3];
+    switch (ins)
+    {
     case 0xA4:
     { // SELECT FILE
         // Select File AID uses the following format for GlobalPlatform
@@ -143,13 +140,13 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp 
         // xx in this case is len of the AID value in hex
 
         // aid len is found as a hex value in receivedCmd[6] (Index Starts at 0)
-        int aidLen = receivedCmd[6];
-        uint8_t *receivedAid = &receivedCmd[7];
+        int aidLen = receivedCmd[4];
+        uint8_t *receivedAid = &receivedCmd[5];
 
         // Dbprintf("Received AID (%d):", aidLen);
         // Dbhexdump(aidLen, receivedAid, false);
 
-        if (receivedCmd[4] == 0x00 && receivedCmd[5] == 0x00) // select by iDF or iEF
+        if (p1 == 0x00 && p2 == 0x00 && aidLen == 2) // select by iDF or iEF
         {
             // if (aidLen == 2) {
             // }
@@ -177,7 +174,7 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp 
                 goto ret;
             }
         }
-        else if (receivedCmd[4] == 0x04 && receivedCmd[5] == 0x00)
+        else if (p1 == 0x04 && p2 == 0x00)
         {
             // try to match name
             fmcos_ef *file = FMCOSEmlGetDFByName(receivedAid, aidLen);
@@ -202,11 +199,12 @@ void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp 
     case 0xB0:
     {
         // READ BINARY
-        uint8_t p1 = receivedCmd[4], p2 = receivedCmd[5];
         uint16_t iEF = 0;
         uint16_t offset = 0;
-        uint8_t le = receivedCmd[6];
+        uint8_t le = receivedCmd[4];
         fmcos_ef *file = NULL;
+
+        // support two types of param format
         if ((p1 & 0xE0) == 0x80) {
             iEF = p1 & 0x1F;
             offset = p2;
@@ -277,7 +275,7 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
         return NULL;
     }
 
-    bool resendLast = false;
+    bool resendLast = false, cmdHasCID = (receivedCmd[0] & 0x08) != 0;
     uint16_t infoFrameRemain = infoFrame.len - nInfoFrameSent;
     // Check for ISO 14443A-4 compliant commands, look at left nibble
 
@@ -291,7 +289,15 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
         fullBlock.data[0] = (receivedCmd[0] & 0xEE) | iCurBlock; // copy but not chained bit
         // resp->data[1] = 0x90;
         // resp->data[2] = 0x00;
-        GenerateFMCOSResponse(receivedCmd, receivedCmdLen, &infoFrame);
+
+        if (cmdHasCID) {
+            // APDU Class Byte
+            // receivedCmd in this case is expecting to structured with a CID, then the APDU command for SelectFile
+            // | IBlock (CID) | CID | APDU Command | CRC |
+            GenerateFMCOSResponse(receivedCmd + 2, receivedCmdLen - 2, &infoFrame);
+        } else {
+            GenerateFMCOSResponse(receivedCmd + 1, receivedCmdLen - 1, &infoFrame);
+        }
         nInfoFrameSent = 0;
         nInfoFrameInAir = 0;
 
@@ -365,7 +371,7 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
         return fullBlock.len > 0 ? &fullBlock : NULL;
     }
 
-    if (receivedCmd[0] & 0x08) { // follow CID
+    if (cmdHasCID) { // follow CID
         fullBlock.data[0] = (fullBlock.data[0] & 0xF7) | 0x08;
         fullBlock.data[1] = receivedCmd[1];
         fullBlock.len = 2;
