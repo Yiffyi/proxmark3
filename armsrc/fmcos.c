@@ -304,7 +304,7 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
     }
     break;
 
-    case 0xB0: // R
+    case 0x80: // R
     {
         if ((receivedCmd[0] & 0xF0) == 0xA0) { // R(ACK)
             if (iRecvBlock != iCurBlock)  {
@@ -356,6 +356,7 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
         }
         // Do not respond
         fullBlock.len = 0;
+        return &fullBlock;
     }
     break;
     }
