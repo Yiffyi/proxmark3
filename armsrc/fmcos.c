@@ -386,7 +386,6 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
 
     clear_trace();
     set_tracing(true);
-    LED_A_ON();
 
     int retval = 0;
     int cmdsRecvd = 0;
@@ -412,13 +411,13 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
             break;
         }
 
-        // looks like its automatically logged
-        // tUart14a *Uart = GetUart14a();
+        tUart14a *Uart = GetUart14a();
         // LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
 
         switch (state)
         {
         case STATE_IDLE:
+            LED_A_ON();
             if (receivedCmd[0] == ISO14443A_CMD_REQA && receivedCmdLen == 1)
             {
                 p_response = &responses[RESP_INDEX_ATQA];
@@ -435,6 +434,7 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
             }
             break;
         case STATE_READY:
+            LED_B_ON();
             if (receivedCmd[1] == 0x20) { // ANTICOLL
                 if (receivedCmd[0] == ISO14443A_CMD_ANTICOLL_OR_SELECT && receivedCmdLen == 2)
                 { // Received request for UID (cascade 1)
@@ -479,6 +479,7 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
 
             break;
         case STATE_ACTIVE:
+            LED_C_ON();
             if (receivedCmd[0] == ISO14443A_CMD_HALT && receivedCmdLen == 4)
             {   // Received a HALT
                 p_response = NULL;
@@ -506,6 +507,7 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
             }
             break;
         case STATE_ISO14443A:
+            LED_D_ON();
             next_state = STATE_ISO14443A;
             if (receivedCmd[0] == ISO14443A_CMD_PPS)
             {
@@ -532,8 +534,17 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
             EmSendCmd(dynamicResp.data, dynamicResp.len);
         } else if (p_response) {
             EmSendPrecompiledCmd(p_response);
+        } else {
+            // looks like its automatically logged when using EmSend*
+            LogTrace(receivedCmd, Uart->len, Uart->startTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->endTime * 16 - DELAY_AIR2ARM_AS_TAG, Uart->parity, true);
         }
 
+        if (next_state != state) {
+            LED_A_OFF();
+            LED_B_OFF();
+            LED_C_OFF();
+            LED_D_OFF();
+        }
         state = next_state;
     }
 
