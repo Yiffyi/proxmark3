@@ -129,7 +129,7 @@ void FMCOSEmlList(void)
 void GenerateFMCOSResponse(uint8_t *receivedCmd, int receivedCmdLen, fmcos_resp *resp)
 {
     resp->len = 0;
-    uint8_t sw1 = 0x90, sw2 = 0x00, cla = receivedCmd[0], ins = receivedCmd[1], p1 = receivedCmd[2], p2 = receivedCmd[3];
+    uint8_t sw1 = 0x90, sw2 = 0x00, /*cla = receivedCmd[0],*/ ins = receivedCmd[1], p1 = receivedCmd[2], p2 = receivedCmd[3];
     switch (ins)
     {
     case 0xA4:
