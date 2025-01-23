@@ -324,9 +324,9 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
             // APDU Class Byte
             // receivedCmd in this case is expecting to structured with a CID, then the APDU command for SelectFile
             // | IBlock (CID) | CID | APDU Command | CRC |
-            GenerateFMCOSResponse(receivedCmd + 2, receivedCmdLen - 2, &infoFrame);
+            GenerateFMCOSResponse(receivedCmd + 2, receivedCmdLen - 4, &infoFrame);
         } else {
-            GenerateFMCOSResponse(receivedCmd + 1, receivedCmdLen - 1, &infoFrame);
+            GenerateFMCOSResponse(receivedCmd + 1, receivedCmdLen - 3, &infoFrame);
         }
         nInfoFrameSent = 0;
         nInfoFrameInAir = 0;
