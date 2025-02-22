@@ -342,7 +342,7 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
 
     case 0x80: // R
     {
-        if ((receivedCmd[0] & 0xF0) == 0xA0) { // R(ACK)
+        if ((receivedCmd[0] & 0x20) == 0x00) { // R(ACK)
             if (iRecvBlock != iCurBlock)  {
                 iCurBlock ^= 1;
                 if (infoFrameRemain > 0) { // send next
@@ -355,7 +355,7 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
                 // send again
             }
 
-        } else if ((receivedCmd[0] & 0xF0) == 0xB0) { // R(NAK)
+        } else { // R(NAK)
             if (iRecvBlock != iCurBlock)  { // send R(ACK)
                 fullBlock.data[0] = 0xA2 | iCurBlock;
                 infoFrame.len = 0;
