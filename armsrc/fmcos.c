@@ -342,7 +342,7 @@ fmcos_resp *PrepareDynamicResponse(uint8_t *receivedCmd, int receivedCmdLen, uin
 
     case 0x80: // R
     {
-        if ((receivedCmd[0] & 0x20) == 0x00) { // R(ACK)
+        if ((receivedCmd[0] & 0x10) == 0x00) { // R(ACK)
             if (iRecvBlock != iCurBlock)  {
                 iCurBlock ^= 1;
                 if (infoFrameRemain > 0) { // send next
