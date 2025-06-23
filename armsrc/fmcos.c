@@ -452,9 +452,8 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
 {
     tag_response_info_t *responses;
     uint32_t cuid = 0;
-    uint32_t counters[3] = {0x00, 0x00, 0x00};
-    uint8_t tearings[3] = {0xbd, 0xbd, 0xbd};
     uint8_t pages = 0;
+    uint8_t ulc_key = 0;
 
     // command buffers
     int receivedCmdLen = 0;
@@ -472,8 +471,8 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
     uint8_t tagType = 4;
     uint16_t flags = 0;
     FLAG_SET_UID_IN_DATA(flags, 4);
-    flags |= FLAG_RATS_IN_DATA;
-    if (SimulateIso14443aInit(tagType, flags, uid, iRATs, irats_len, &responses, &cuid, counters, tearings, &pages) == false)
+    flags |= FLAG_ATS_IN_DATA;
+    if (SimulateIso14443aInit(tagType, flags, uid, iRATs, irats_len, &responses, &cuid, &pages, &ulc_key) == false)
     {
         BigBuf_free_keep_EM();
         reply_ng(CMD_HF_MIFARE_SIMULATE, PM3_EINIT, NULL, 0);
@@ -604,7 +603,7 @@ void SimulateFMCOSTag(uint8_t *uid, uint8_t *iRATs, size_t irats_len)
                 next_state = STATE_IDLE;
             } else if (receivedCmd[0] == ISO14443A_CMD_RATS && receivedCmdLen == 4)
             { // Received a RATS request
-                p_response = &responses[RESP_INDEX_RATS];
+                p_response = &responses[RESP_INDEX_ATS];
                 // {FSDI, CID}
                 FSDI = receivedCmd[1] >> 4;
                 CID = receivedCmd[1] & 0x0F;

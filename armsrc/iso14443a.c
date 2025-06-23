@@ -3420,12 +3420,10 @@ int iso14_apdu(uint8_t *cmd, uint16_t cmd_len, bool send_chaining, void *data, u
         *res = data_bytes[0];
     }
 
-        // crc check
-        if (len >= 3 && !CheckCrc14A(data_bytes, len)) {
-            BigBuf_free_keep_EM();
-            return -1;
-        }
-
+    // crc check
+    if (len >= 3 && !CheckCrc14A(data_bytes, len)) {
+        BigBuf_free_keep_EM();
+        return -1;
     }
 
     if (len) {
