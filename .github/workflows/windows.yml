@@ -14,6 +14,8 @@ on:
       - 'traces/**'
       - '.vscode/**'
 
+env:
+  PLATFORM: PM3GENERIC
 
 jobs:
   proxspace:
@@ -54,10 +56,16 @@ jobs:
         run: make clean
 
       - name: Build
-        run: make -j $([System.Environment]::ProcessorCount + 1) V=1
+        run: make -j $([System.Environment]::ProcessorCount + 1) V=1 && make tarbin
 
       - name: Test
         run: make check
+
+      - name: Upload firmware directory
+        uses: actions/upload-artifact@main
+        with:
+          name: proxmark3-${{ runner.os }}
+          path: proxmark3-*-bin.tar.gz
 
       - name: make clean
         run: make clean
